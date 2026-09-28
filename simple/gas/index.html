@@ -31,6 +31,10 @@
 <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title"></div>
 <div class="toast" id="toast" hidden></div>
 
+<script>
+  // doGet が読んだURLの値。すでに検査済み（Code.gs の ALLOWED_PAGES_）
+  var INITIAL_ROUTE = { page: '<?= initialPage ?>', id: '<?= initialId ?>' };
+</script>
 <?!= include('health'); ?>
 <?!= include('app'); ?>
 </body>

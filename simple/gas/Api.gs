@@ -56,11 +56,18 @@ function getBootstrap() {
     };
   });
 
+  // 人は共通マスタから読む（Common.gs）。読めなければ控え、それも無ければ users シート
+  var pp = peopleForUi_();
   var me = currentUser_();
   return {
     today: t,
     me: me ? { user_id: me.user_id, name: me.name, email: me.email, role: me.role } : null,
-    users: readAll_('users').map(strip_),
+    users: pp.people.map(function (p) {
+      // 画面は user_id / name で扱う。user_id の中身は社員コード（common のとき）
+      return { user_id: p.code, name: p.name, email: p.email, dept: p.deptName, position: p.positionName };
+    }),
+    peopleSource: pp.source,
+    peopleNote: pp.note,
     projects: projects.map(strip_),
     summary: summary,
     templates: readAll_('templates').map(strip_),

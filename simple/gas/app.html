@@ -51,9 +51,12 @@
         $('today').textContent = '今日 ' + d.today;
         $('me').textContent = d.me ? d.me.name : '未登録';
         $('bell-dot').hidden = !d.unread;
+        S.peopleSource = d.peopleSource || 'ローカル';
+        S.peopleNote = d.peopleNote || '';
         renderNav();
-        render();
+        applyInitialRoute();               // URLで指定された画面を開く
         loadItems();                       // ② 裏で読む。画面はもう出ている
+        if (S.peopleNote) toast(S.peopleNote, S.peopleSource !== 'common');
       })
       .withFailureHandler(fail)
       .getBootstrap();
@@ -61,7 +64,7 @@
 
   function loadItems() {
     google.script.run
-      .withSuccessHandler(function (items) { S.items = items; render(); })
+      .withSuccessHandler(function (items) { S.items = items; render(); openPendingTask(); })
       .withFailureHandler(fail)
       .getItems();
   }
@@ -122,12 +125,82 @@
 
   $('btn-bell').addEventListener('click', function () { go('notifications'); });
 
-  function go(view) {
+  function go(view, opts) {
     S.view = view;
     if (view !== 'detail') S.projectId = null;
     renderNav();
     render();
     window.scrollTo(0, 0);
+    if (!(opts && opts.silent)) pushUrl();
+  }
+
+  // ---------------------------------------------------------------- URL（直接アクセス）
+  /**
+   * 画面を切り替えるたびにURLを書き換える。ページは再読み込みしない。
+   * GAS のウェブアプリは iframe の中なので、URLの操作は google.script.history を使う。
+   * これが無い環境（ローカルで開いたときなど）では何もしない。
+   */
+  function pushUrl() {
+    var params = { p: S.view };
+    if (S.view === 'detail' && S.projectId) params.id = S.projectId;
+    try {
+      if (window.google && google.script && google.script.history) {
+        google.script.history.replace(null, params);
+      }
+    } catch (e) { /* URLを書けなくても画面は動く */ }
+  }
+
+  /**
+   * 起動時にURLで指定された画面を開く。
+   * **URLの値は信用しない。** 実在しないIDなら一覧に落とし、その旨を伝える。
+   */
+  function applyInitialRoute() {
+    var r = (typeof INITIAL_ROUTE === 'object' && INITIAL_ROUTE) ? INITIAL_ROUTE : { page: 'projects', id: '' };
+    var page = r.page || 'projects';
+
+    if (page === 'detail' || page === 'task') {
+      if (!r.id) { go('projects', { silent: true }); return; }
+      if (page === 'detail') {
+        if (!project(r.id)) {
+          toast('そのプロジェクトは見つかりませんでした', true);
+          go('projects', { silent: true });
+          return;
+        }
+        S.projectId = r.id;
+        go('detail', { silent: true });
+        return;
+      }
+      // ?p=task&id=… はタスクの編集を開いた状態にする。タスクを読み終えてから開く
+      pendingTaskId = r.id;
+      go('projects', { silent: true });
+      return;
+    }
+    go(page, { silent: true });
+  }
+
+  /** ?p=task&id=… で指定されたタスク。getItems() が終わってから開く */
+  var pendingTaskId = null;
+  function openPendingTask() {
+    if (!pendingTaskId) return;
+    var id = pendingTaskId;
+    pendingTaskId = null;
+    var it = itemById(id);
+    if (!it) { toast('そのタスクは見つかりませんでした', true); return; }
+    S.projectId = it.project_id;
+    go('detail', { silent: true });
+    openTaskEditor(id, null);
+  }
+
+  /** いまの画面を指すURLを作る（「このページのリンクをコピー」で使う） */
+  function currentUrl(cb) {
+    try {
+      google.script.url.getLocation(function (loc) {
+        var base = loc.url || '';
+        var q = '?p=' + encodeURIComponent(S.view) +
+          (S.view === 'detail' && S.projectId ? '&id=' + encodeURIComponent(S.projectId) : '');
+        cb(base.split('?')[0] + q);
+      });
+    } catch (e) { cb(''); }
   }
 
   // ---------------------------------------------------------------- 描画
