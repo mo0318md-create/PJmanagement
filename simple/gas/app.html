@@ -384,11 +384,51 @@
           '<button class="btn sm" id="d-toggle">' + (anyOpen ? 'すべて折りたたむ' : 'すべて開く') + '</button>' +
           '<span class="count">タスク ' + c.doneCount + ' / ' + c.childCount + ' 完了（子 ' + subDone + ' / ' + subTotal + '）</span>' +
         '</div>' +
+        customFieldsCard(p) +
         '<section class="card"><div class="tbl-wrap">' +
           '<div class="tree-row head"><div>タスク</div><div>状態</div><div class="col-hide">進捗</div>' +
           '<div class="col-hide">担当</div><div class="col-hide">期限</div></div>' +
           (rows || '<div class="empty">タスクがありません</div>') +
         '</div></section>');
+  }
+
+  /* テンプレートの項目定義を覚えておく。表示のたびに読みに行かないため */
+  var tplFieldCache = {};
+
+  /** キーからラベルを引く。テンプレート由来ならその表示名、その場で足した項目はキーがそのまま名前 */
+  function cfLabel(p, key) {
+    var defs = p.template_id ? tplFieldCache[p.template_id] : null;
+    if (defs) {
+      for (var i = 0; i < defs.length; i++) if (defs[i].field_key === key) return defs[i].label;
+    }
+    return key;
+  }
+
+  /** 概要に設定項目を出す。値が1つも無いときは出さない（空のカードを並べない） */
+  function customFieldsCard(p) {
+    var cf = p.custom_fields || {};
+    // テンプレート由来の項目名を出すために、定義を1度だけ読む
+    if (p.template_id && !tplFieldCache[p.template_id]) {
+      tplFieldCache[p.template_id] = [];
+      google.script.run.withSuccessHandler(function (d) {
+        tplFieldCache[p.template_id] = d.fields || [];
+        if (S.view === 'detail' && S.projectId === p.project_id) render();
+      }).getTemplateDetail(p.template_id);
+    }
+    var keys = Object.keys(cf).filter(function (k) {
+      var v = cf[k];
+      return v !== '' && v !== null && v !== undefined && v !== false;
+    });
+    if (!keys.length) return '';
+    return '<section class="card"><div class="card-head"><h2>設定項目</h2>' +
+        '<span class="spacer"></span><button class="btn sm" data-tab="settings">編集</button></div>' +
+      '<div class="card-body"><dl style="display:grid;grid-template-columns:160px minmax(0,1fr);gap:10px 16px;margin:0">' +
+        keys.map(function (k) {
+          var v = cf[k];
+          return '<dt class="faint">' + esc(cfLabel(p, k)) + '</dt><dd style="margin:0">' +
+            esc(v === true ? 'はい' : String(v)) + '</dd>';
+        }).join('') +
+      '</dl></div></section>';
   }
 
   function treeRow(n, level, hasKids) {
@@ -604,6 +644,15 @@
   }
 
   function wireInputs() {
+    // ⑨ 作成画面を開いた直後。テンプレート未選択でも項目を足せる
+    if (S.view === 'new') {
+      var nf = $('n-fields');
+      if (nf && !nf.innerHTML) {
+        renderCustomFields('n-fields', 'n', tplFields, {}, cfNoteForNew());
+        renderPreview();
+      }
+    }
+
     // プロジェクト設定を開いたら、固有項目を読み込む
     if (S.view === 'detail' && S.tab === 'settings' && $('p-custom')) {
       var pj = project(S.projectId);
@@ -686,6 +735,151 @@
       })
       .withFailureHandler(function (err) { fail(err); render(); })
       .saveItem(payload);
+  }
+
+  /* ============ 設定項目（テンプレート由来＋その場で足した項目） ============
+   *
+   * テンプレートは「よく使う項目を最初から並べておく」ためのもの。
+   * テンプレートを使わなくても、使っていても、項目はその場で足せる。
+   *   - テンプレート由来 … 型（文字/数値/日付/選択肢/はい・いいえ）と必須の指定がある
+   *   - その場で足した項目 … 項目名と値を入れるだけ。値は文字として持つ
+   * どちらも projects.custom_fields に { 項目のキー: 値 } で入る。
+   */
+  var cfExtra = {};       // prefix -> [{ key, value }]
+
+  function cfInput(id, type, options, v) {
+    if (type === 'select') {
+      return '<select id="' + id + '"><option value=""></option>' +
+        (options || []).map(function (o) {
+          return '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>';
+        }).join('') + '</select>';
+    }
+    if (type === 'checkbox') {
+      return '<label class="help"><input type="checkbox" id="' + id + '"' + (v ? ' checked' : '') + '> はい</label>';
+    }
+    var t = type === 'number' ? 'number' : (type === 'date' ? 'date' : 'text');
+    return '<input id="' + id + '" type="' + t + '" value="' + esc(v === undefined || v === null ? '' : v) + '">';
+  }
+
+  /**
+   * 設定項目の入力欄を描く。
+   * @param boxId     入れ物のID
+   * @param prefix    入力欄のIDの頭（画面ごとに変える）
+   * @param tplFields テンプレート由来の項目（無ければ空配列）
+   * @param values    いまの値（custom_fields）
+   * @param note      見出しの下に出す一言
+   */
+  function renderCustomFields(boxId, prefix, tplFields, values, note) {
+    var box = $(boxId);
+    if (!box) return;
+    tplFields = tplFields || [];
+    values = values || {};
+
+    // テンプレートに無いキーは「その場で足した項目」。初回だけ値から拾う
+    if (!cfExtra[prefix]) {
+      var known = {};
+      tplFields.forEach(function (f) { known[f.field_key] = true; });
+      cfExtra[prefix] = Object.keys(values)
+        .filter(function (k) { return !known[k]; })
+        .map(function (k) { return { key: k, value: values[k] }; });
+    }
+
+    var html = '<h3 style="margin:20px 0 6px">設定項目</h3>' +
+      '<p class="help" style="margin:0 0 12px">' + esc(note || '') + '</p>';
+
+    html += tplFields.map(function (f) {
+      var id = prefix + '-tpl-' + f.field_key;
+      return '<div class="field"><label for="' + id + '">' + esc(f.label) +
+        (f.required ? ' <span class="late">必須</span>' : '') + '</label>' +
+        cfInput(id, f.type, f.options, values[f.field_key]) + '</div>';
+    }).join('');
+
+    html += cfExtra[prefix].map(function (row, i) {
+      return '<div class="row2" style="align-items:end">' +
+        '<div class="field" style="margin-bottom:10px"><label>項目名</label>' +
+          '<input id="' + prefix + '-ek-' + i + '" type="text" value="' + esc(row.key) + '" placeholder="例：発注先"></div>' +
+        '<div class="field" style="margin-bottom:10px"><label>値</label>' +
+          '<div style="display:flex;gap:8px">' +
+            '<input id="' + prefix + '-ev-' + i + '" type="text" value="' + esc(row.value) + '" style="flex:1">' +
+            '<button type="button" class="btn sm" data-cfdel="' + prefix + ':' + i + '" aria-label="この項目を消す">×</button>' +
+          '</div></div>' +
+      '</div>';
+    }).join('');
+
+    html += '<button type="button" class="btn sm" data-cfadd="' + prefix + '">＋ 項目を追加</button>';
+    box.innerHTML = html;
+  }
+
+  /** 入力欄の値を custom_fields の形にする */
+  function collectCustomFieldsFrom(prefix, tplFields) {
+    var out = {};
+    (tplFields || []).forEach(function (f) {
+      var el = $(prefix + '-tpl-' + f.field_key);
+      if (!el) return;
+      out[f.field_key] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? Number(el.value) : el.value);
+    });
+    (cfExtra[prefix] || []).forEach(function (row, i) {
+      var k = $(prefix + '-ek-' + i), v = $(prefix + '-ev-' + i);
+      if (!k) return;
+      var key = String(k.value || '').trim();
+      if (!key) return;                     // 項目名が空の行は捨てる
+      out[key] = v ? v.value : '';
+    });
+    return out;
+  }
+
+  /** 画面の値をいったん控えてから描き直す（入力中の値を失わないため） */
+  function cfRefresh(prefix, tplFields) {
+    (cfExtra[prefix] || []).forEach(function (row, i) {
+      var k = $(prefix + '-ek-' + i), v = $(prefix + '-ev-' + i);
+      if (k) row.key = k.value;
+      if (v) row.value = v.value;
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var add = e.target.closest('[data-cfadd]');
+    if (add) {
+      var pre = add.getAttribute('data-cfadd');
+      cfRefresh(pre);
+      cfExtra[pre].push({ key: '', value: '' });
+      redrawCustomFields(pre);
+      return;
+    }
+    var del = e.target.closest('[data-cfdel]');
+    if (del) {
+      var parts = del.getAttribute('data-cfdel').split(':');
+      cfRefresh(parts[0]);
+      cfExtra[parts[0]].splice(Number(parts[1]), 1);
+      redrawCustomFields(parts[0]);
+    }
+  });
+
+  /** 足す・消すのあとに描き直す。画面ごとに入れ物と項目定義が違う */
+  function redrawCustomFields(prefix) {
+    if (prefix === 'n') {
+      renderCustomFields('n-fields', 'n', tplFields, collectCustomFieldsFrom('n', tplFields), cfNoteForNew());
+    } else if (prefix === 'p') {
+      var p = project(S.projectId);
+      if (p) renderCustomFields('p-custom', 'p', pjFields, collectCustomFieldsFrom('p', pjFields), cfNoteForProject(p));
+    }
+  }
+
+  function cfNoteForNew() {
+    var tplName = '';
+    var sel = $('n-tpl');
+    if (sel && sel.value) {
+      S.templates.forEach(function (t) { if (t.template_id === sel.value) tplName = t.name; });
+    }
+    return tplName
+      ? '「' + tplName + '」テンプレートの項目が並んでいます。足りないものはその場で足せます'
+      : 'テンプレートを使わないので、必要な項目をその場で足してください';
+  }
+
+  function cfNoteForProject(p) {
+    return p.template_id
+      ? '「' + (p.template_name || '') + '」テンプレートの項目が並んでいます。足りないものはその場で足せます'
+      : 'テンプレートを使っていないプロジェクトです。必要な項目をその場で足せます';
   }
 
   // ---- ⑨ プロジェクト作成 ----
@@ -786,35 +980,26 @@
   }
 
   function loadTemplateFields(templateId) {
+    var keep = collectCustomFieldsFrom('n', tplFields);   // 入力済みの自由項目は残す
     tplFields = []; tplItems = [];
+    delete cfExtra['n'];
     var box = $('n-fields');
-    if (!templateId) { box.innerHTML = ''; renderPreview(); return; }
+    if (!templateId) {
+      renderCustomFields('n-fields', 'n', [], keep, cfNoteForNew());
+      renderPreview();
+      return;
+    }
     box.innerHTML = '<div class="help">設定項目を読み込んでいます…</div>';
     google.script.run.withSuccessHandler(function (d) {
       tplFields = d.fields;
       tplItems = d.items || [];
       renderPreview();
-      box.innerHTML = d.fields.length
-        ? '<h3 style="margin:18px 0 10px">このテンプレートの設定項目</h3>' + d.fields.map(function (f) {
-            var id = 'cf-' + f.field_key, input;
-            if (f.type === 'select') input = '<select id="' + id + '"><option value=""></option>' +
-              (f.options || []).map(function (o) { return '<option>' + esc(o) + '</option>'; }).join('') + '</select>';
-            else if (f.type === 'checkbox') input = '<label class="help"><input type="checkbox" id="' + id + '"> はい</label>';
-            else input = '<input id="' + id + '" type="' + (f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text') + '">';
-            return '<div class="field"><label for="' + id + '">' + esc(f.label) +
-              (f.required ? ' <span class="late">必須</span>' : '') + '</label>' + input + '</div>';
-          }).join('')
-        : '';
+      renderCustomFields('n-fields', 'n', tplFields, keep, cfNoteForNew());
     }).withFailureHandler(fail).getTemplateDetail(templateId);
   }
 
   function createProjectNow() {
-    var cf = {};
-    tplFields.forEach(function (f) {
-      var el = $('cf-' + f.field_key);
-      if (!el) return;
-      cf[f.field_key] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? Number(el.value) : el.value);
-    });
+    var cf = collectCustomFieldsFrom('n', tplFields);
     var btn = $('n-create');
     btn.disabled = true; btn.textContent = '作成しています…';
     google.script.run
@@ -876,7 +1061,7 @@
         p.start_date = $('p-start').value; p.end_date = $('p-end').value;
         p.owner_user_id = $('p-owner').value; p.status = $('p-status').value;
         p.key = $('p-key').value.toUpperCase();
-        p.custom_fields = collectCustomFields(p);
+        p.custom_fields = collectCustomFieldsFrom('p', pjFields);
         p.updated_at = r.updated_at;
         btn.disabled = false;
         toast('保存しました');
@@ -889,7 +1074,7 @@
         start_date: $('p-start').value, end_date: $('p-end').value,
         owner_user_id: $('p-owner').value, status: $('p-status').value,
         key: $('p-key').value.toUpperCase(),
-        custom_fields: collectCustomFields(p)
+        custom_fields: collectCustomFieldsFrom('p', pjFields)
       });
   });
 
@@ -900,56 +1085,22 @@
   var pjFields = [];
   function loadProjectFields(p) {
     pjFields = [];
+    delete cfExtra['p'];
     var box = $('p-custom');
     if (!box) return;
     if (!p.template_id) {
-      box.innerHTML = '<h3 style="margin:20px 0 10px">固有の設定項目</h3>' +
-        '<p class="help" style="margin:0">このプロジェクトはテンプレートを使っていないため、固有の設定項目はありません。' +
-        '項目が要る場合は、テンプレートに定義してから作り直してください。</p>';
+      renderCustomFields('p-custom', 'p', [], p.custom_fields || {}, cfNoteForProject(p));
       return;
     }
-    box.innerHTML = '<div class="help">固有の設定項目を読み込んでいます…</div>';
+    box.innerHTML = '<div class="help">設定項目を読み込んでいます…</div>';
     google.script.run.withSuccessHandler(function (d) {
       pjFields = d.fields || [];
-      var cf = p.custom_fields || {};
-      box.innerHTML = pjFields.length
-        ? '<h3 style="margin:20px 0 10px">固有の設定項目</h3>' +
-          '<p class="help" style="margin:-4px 0 12px">「' + esc(p.template_name) + '」テンプレートの定義から作られています</p>' +
-          pjFields.map(function (f) {
-            var id = 'pcf-' + f.field_key, v = cf[f.field_key], input;
-            if (f.type === 'select') {
-              input = '<select id="' + id + '"><option value=""></option>' +
-                (f.options || []).map(function (o) {
-                  return '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>';
-                }).join('') + '</select>';
-            } else if (f.type === 'checkbox') {
-              input = '<label class="help"><input type="checkbox" id="' + id + '"' + (v ? ' checked' : '') + '> はい</label>';
-            } else {
-              var t = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
-              input = '<input id="' + id + '" type="' + t + '" value="' +
-                esc(v === undefined || v === null ? '' : v) + '">';
-            }
-            return '<div class="field"><label for="' + id + '">' + esc(f.label) +
-              (f.required ? ' <span class="late">必須</span>' : '') + '</label>' + input + '</div>';
-          }).join('')
-        : '<h3 style="margin:20px 0 10px">固有の設定項目</h3>' +
-          '<p class="help" style="margin:0">このテンプレートには設定項目が定義されていません</p>';
+      renderCustomFields('p-custom', 'p', pjFields, p.custom_fields || {}, cfNoteForProject(p));
     }).withFailureHandler(function () {
       box.innerHTML = '<p class="help">固有の設定項目を読み込めませんでした</p>';
     }).getTemplateDetail(p.template_id);
   }
 
-  /** 画面の入力値を custom_fields の形にする */
-  function collectCustomFields(p) {
-    if (!pjFields.length) return p.custom_fields || {};
-    var out = {};
-    pjFields.forEach(function (f) {
-      var el = $('pcf-' + f.field_key);
-      if (!el) return;
-      out[f.field_key] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? Number(el.value) : el.value);
-    });
-    return out;
-  }
 
   // ---- ⑦ タスクの編集（小窓） ----
   function openTaskEditor(itemId, projectIdForNew, parentIdForNew) {
