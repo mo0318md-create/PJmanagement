@@ -9,22 +9,12 @@
 
 // ---------------------------------------------------------------- 読み込み
 
-/** ログイン中の人。users シートのメールと突き合わせる */
+/**
+ * ログイン中の人。担当者一覧（peopleForUi_、Common.gs）と**同じID空間**で返す。
+ * 実体は resolveMe_（Common.gs）。ここでは pp を省略して呼ぶだけの薄いラッパー。
+ */
 function currentUser_() {
-  var email = '';
-  try { email = Session.getActiveUser().getEmail() || ''; } catch (e) { email = ''; }
-  var users = readAll_('users');
-  var me = null;
-  if (email) {
-    for (var i = 0; i < users.length; i++) {
-      if (String(users[i].email).toLowerCase() === email.toLowerCase()) { me = users[i]; break; }
-    }
-  }
-  // 見つからないときは最初の管理者（初回セットアップ中などのため）
-  if (!me) {
-    for (var j = 0; j < users.length; j++) if (users[j].role === 'admin') { me = users[j]; break; }
-  }
-  return me;
+  return resolveMe_(peopleForUi_());
 }
 
 /**
@@ -58,16 +48,26 @@ function getBootstrap() {
 
   // 人は共通マスタから読む（Common.gs）。読めなければ控え、それも無ければ users シート
   var pp = peopleForUi_();
-  var me = currentUser_();
+  // ログイン中の人も、担当者一覧と同じID空間で解決する（pp を渡して二重取得を避ける）
+  var me = resolveMe_(pp);
+  var note = pp.note;
+  var peopleOut = pp.people.slice();
+  if (me && me.notInPeopleList) {
+    var extra = '担当者一覧に自分（' + me.email + '）が見当たりません。担当者候補に加えて動かします';
+    note = note ? note + ' ／ ' + extra : extra;
+    // 選択肢に自分が出ないと、オーナーやマイタスクが成立しない。先頭に加えておく
+    peopleOut.unshift({ code: me.user_id, name: me.name, email: me.email, deptName: '', positionName: '' });
+  }
   return {
     today: t,
-    me: me ? { user_id: me.user_id, name: me.name, email: me.email, role: me.role } : null,
-    users: pp.people.map(function (p) {
+    me: me ? { user_id: me.user_id, name: me.name, email: me.email, role: me.role,
+               notInPeopleList: !!me.notInPeopleList } : null,
+    users: peopleOut.map(function (p) {
       // 画面は user_id / name で扱う。user_id の中身は社員コード（common のとき）
       return { user_id: p.code, name: p.name, email: p.email, dept: p.deptName, position: p.positionName };
     }),
     peopleSource: pp.source,
-    peopleNote: pp.note,
+    peopleNote: note,
     projects: projects.map(strip_),
     summary: summary,
     templates: readAll_('templates').map(strip_),
@@ -403,6 +403,203 @@ function saveSettings(patch) {
     });
     return readSettings_();
   });
+}
+
+// ---------------------------------------------------------------- 権限（admin/member）
+//
+// 【役職と身元の分離】人の身元（誰であるか）は共通マスタから読む（Common.gs、社員コード）。
+// 役職（admin/member）は共通マスタに無い、このアプリだけの概念なので、
+// ローカルの users シートに email をキーとして持つ。書き込むのは users シートだけで、
+// 共通マスタには一切書き込まない（Common.gs 冒頭のコメントの境界を守る）。
+
+/** 管理者一覧の元データ。ローカル users シートに登録がある人だけ role を上書きできる */
+function getRoles() {
+  return readAll_('users').map(function (u) {
+    return { email: u.email, name: u.name, role: u.role };
+  });
+}
+
+/** 役職を保存する（管理者のみ）。ローカルの users シートに email で upsert する */
+function saveRole(data) {
+  return withLock_(function () {
+    var me = currentUser_();
+    if (!me || me.role !== 'admin') throw new Error('権限を変えられるのは管理者だけです');
+    var email = String(data.email || '').trim();
+    if (!email) throw new Error('メールアドレスは必須です');
+    var role = data.role === 'admin' ? 'admin' : 'member';
+
+    var users = readAll_('users');
+    var existing = null;
+    for (var i = 0; i < users.length; i++) {
+      if (String(users[i].email).toLowerCase() === email.toLowerCase()) { existing = users[i]; break; }
+    }
+    if (existing) {
+      updateRow_('users', existing.user_id, { role: role, name: data.name || existing.name });
+    } else {
+      // 最後の管理者を member に落とすと、誰も設定を触れなくなる。ここで止める
+      insertRow_('users', {
+        user_id: uuid_(), name: data.name || email, email: email, role: role, active: true, created_at: now_()
+      });
+    }
+    // 最後の管理者を member に落とす操作を防ぐ
+    var after = readAll_('users');
+    var admins = after.filter(function (u) { return u.role === 'admin'; });
+    if (!admins.length) {
+      throw new Error('管理者が0人になってしまいます。誰か1人は管理者のままにしてください');
+    }
+    return getRoles();
+  });
+}
+
+// ---------------------------------------------------------------- ⑯ テンプレート編集（管理者のみ）
+//
+// テンプレートは「よく使う項目・タスク構成を最初から並べておく」ための入力短縮の型。
+// 変更は既存プロジェクトに遡及しない（作成時にコピーされるだけ。F-1-9）ので、
+// ここでの編集は「次にこのテンプレートで作るプロジェクトから」効く。
+
+function assertAdmin_() {
+  var me = currentUser_();
+  if (!me || me.role !== 'admin') throw new Error('テンプレートを変えられるのは管理者だけです');
+  return me;
+}
+
+/** テンプレート一覧＋各テンプレートのタスク数・項目数（一覧表示用） */
+function getTemplates() {
+  var items = readAll_('template_items'), fields = readAll_('template_fields');
+  return readAll_('templates').sort(function (a, b) { return (a.sort_order || 0) - (b.sort_order || 0); })
+    .map(function (t) {
+      var o = strip_(t);
+      o.item_count = items.filter(function (x) { return x.template_id === t.template_id; }).length;
+      o.field_count = fields.filter(function (x) { return x.template_id === t.template_id; }).length;
+      return o;
+    });
+}
+
+function createTemplate(data) {
+  return withLock_(function () {
+    assertAdmin_();
+    if (!String(data.name || '').trim()) throw new Error('テンプレート名は必須です');
+    var prefix = String(data.key_prefix || '').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
+      throw new Error('キーの接頭辞は英大文字で始まる2〜10文字の英数字にしてください（例：WEB）');
+    }
+    var tpl = {
+      template_id: uuid_(), name: data.name, description: data.description || '',
+      key_prefix: prefix, active: true,
+      sort_order: (readAll_('templates').length + 1) * 100,
+      created_at: now_(), updated_at: now_()
+    };
+    insertRow_('templates', tpl);
+    return strip_(tpl);
+  });
+}
+
+function updateTemplate(data) {
+  return withLock_(function () {
+    assertAdmin_();
+    var cur = findById_('templates', data.template_id);
+    if (!cur) throw new Error('テンプレートが見つかりません');
+    if (!String(data.name || '').trim()) throw new Error('テンプレート名は必須です');
+    var prefix = String(data.key_prefix || '').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
+      throw new Error('キーの接頭辞は英大文字で始まる2〜10文字の英数字にしてください（例：WEB）');
+    }
+    updateRow_('templates', cur.template_id, {
+      name: data.name, description: data.description || '', key_prefix: prefix,
+      active: data.active !== false, updated_at: now_()
+    });
+    return { ok: true };
+  });
+}
+
+/** テンプレートを消す。すでにこのテンプレートで作ったプロジェクトには影響しない（コピー済みのため） */
+function deleteTemplate(templateId) {
+  return withLock_(function () {
+    assertAdmin_();
+    readAll_('template_items').filter(function (x) { return x.template_id === templateId; })
+      .forEach(function (x) { deleteRow_('template_items', x.template_item_id); });
+    readAll_('template_fields').filter(function (x) { return x.template_id === templateId; })
+      .forEach(function (x) { deleteRow_('template_fields', x.field_id); });
+    deleteRow_('templates', templateId);
+    return { ok: true };
+  });
+}
+
+/** タスク構成の1行を足す／直す／消す。data.template_item_id が有れば更新、無ければ追加 */
+function saveTemplateItem(data) {
+  return withLock_(function () {
+    assertAdmin_();
+    if (!String(data.name || '').trim()) throw new Error('タスク名は必須です');
+    var level = data.parent_template_item_id ? 2 : 1;
+    var row = {
+      template_id: data.template_id, level: level,
+      parent_template_item_id: data.parent_template_item_id || '',
+      name: data.name, item_type: ITEM_TYPES.indexOf(data.item_type) >= 0 ? data.item_type : 'work',
+      start_offset_days: Number(data.start_offset_days) || 0,
+      duration_days: Math.max(1, Number(data.duration_days) || 1)
+    };
+    if (data.template_item_id) {
+      if (!findById_('template_items', data.template_item_id)) throw new Error('タスクが見つかりません');
+      updateRow_('template_items', data.template_item_id, row);
+      return { ok: true, template_item_id: data.template_item_id };
+    }
+    row.template_item_id = uuid_();
+    var siblings = readAll_('template_items').filter(function (x) {
+      return x.template_id === data.template_id && Number(x.level) === level &&
+        String(x.parent_template_item_id || '') === String(row.parent_template_item_id);
+    });
+    row.sort_order = siblings.length ? Math.max.apply(null, siblings.map(function (x) { return Number(x.sort_order) || 0; })) + 100 : 100;
+    insertRow_('template_items', row);
+    return { ok: true, template_item_id: row.template_item_id };
+  });
+}
+
+function deleteTemplateItem(templateItemId) {
+  return withLock_(function () {
+    assertAdmin_();
+    // 親を消すときは、配下の子タスク定義も一緒に消す
+    readAll_('template_items').filter(function (x) { return x.parent_template_item_id === templateItemId; })
+      .forEach(function (x) { deleteRow_('template_items', x.template_item_id); });
+    deleteRow_('template_items', templateItemId);
+    return { ok: true };
+  });
+}
+
+/** 設定項目の定義を足す／直す／消す */
+function saveTemplateField(data) {
+  return withLock_(function () {
+    assertAdmin_();
+    var key = String(data.field_key || '').trim();
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error('項目キーは英字で始まる英数字とアンダースコアにしてください（例：client_name）');
+    }
+    if (!String(data.label || '').trim()) throw new Error('表示名は必須です');
+    var dup = readAll_('template_fields').filter(function (x) {
+      return x.template_id === data.template_id && x.field_key === key && x.field_id !== data.field_id;
+    });
+    if (dup.length) throw new Error('この項目キーはこのテンプレートですでに使われています');
+
+    var row = {
+      template_id: data.template_id, field_key: key, label: data.label,
+      type: ['text', 'number', 'date', 'select', 'checkbox'].indexOf(data.type) >= 0 ? data.type : 'text',
+      required: !!data.required,
+      options: data.type === 'select' ? String(data.options || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean) : []
+    };
+    if (data.field_id) {
+      if (!findById_('template_fields', data.field_id)) throw new Error('設定項目が見つかりません');
+      updateRow_('template_fields', data.field_id, row);
+      return { ok: true, field_id: data.field_id };
+    }
+    row.field_id = uuid_();
+    var siblings = readAll_('template_fields').filter(function (x) { return x.template_id === data.template_id; });
+    row.sort_order = siblings.length ? Math.max.apply(null, siblings.map(function (x) { return Number(x.sort_order) || 0; })) + 100 : 100;
+    insertRow_('template_fields', row);
+    return { ok: true, field_id: row.field_id };
+  });
+}
+
+function deleteTemplateField(fieldId) {
+  return withLock_(function () { assertAdmin_(); deleteRow_('template_fields', fieldId); return { ok: true }; });
 }
 
 // ---------------------------------------------------------------- 集計キャッシュ

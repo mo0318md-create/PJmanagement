@@ -270,6 +270,62 @@ function personName_(code) {
   return '';
 }
 
+/**
+ * ログイン中の人を、**担当者一覧と同じID空間**で解決する。
+ *
+ * 【直した矛盾】担当者の選択肢（プロジェクトのオーナー・タスクの担当者）は
+ * peopleForUi_() が返す一覧から作る。共通マスタが有効なときは、その一覧の
+ * user_id は「社員コード」になる。ところが以前は、ログイン中の人だけを
+ * 別の場所（ローカルの users シート、主キーはUUID）から探していたため、
+ * 「自分の担当タスク」（マイタスク）が **自分のIDと担当者のIDが別の空間になり、
+ * 一致せず1件も出ない** という不具合になっていた。
+ *
+ * ここでは pp（peopleForUi_() の結果）から自分のメールで探し、
+ * 見つかった人の code をそのまま user_id として使う。
+ * **役職（admin/member）は common に無い概念**なので、ローカルの users シートで別に管理する。
+ *
+ * @param pp peopleForUi_() の結果。省略時はここで取得する
+ */
+function resolveMe_(pp) {
+  pp = pp || peopleForUi_();
+  var email = '';
+  try { email = Session.getActiveUser().getEmail() || ''; } catch (e) { email = ''; }
+
+  var person = null;
+  if (email) {
+    for (var i = 0; i < pp.people.length; i++) {
+      if (String(pp.people[i].email).toLowerCase() === email.toLowerCase()) { person = pp.people[i]; break; }
+    }
+  }
+
+  var localUsers = readAll_('users');
+  var localRow = null;
+  if (email) {
+    for (var j = 0; j < localUsers.length; j++) {
+      if (String(localUsers[j].email).toLowerCase() === email.toLowerCase()) { localRow = localUsers[j]; break; }
+    }
+  }
+
+  if (person) {
+    // 担当者一覧に居る（通常のとき）。役職だけローカルから補う（無ければ member）
+    return { user_id: person.code, name: person.name, email: person.email, role: localRow ? localRow.role : 'member' };
+  }
+  if (localRow) {
+    // 担当者一覧には居ないが、ローカルの users シートには居る
+    // （common未設定／共通マスタにまだ登録されていない人・初期セットアップ中の管理者など）。
+    // ローカルのIDで動かす。担当者一覧の中には現れないので、自分の担当タスクは
+    // 「担当者一覧に自分が見当たらない」ことに気づけるよう、呼び出し側で inPeopleList を見て知らせる。
+    return { user_id: localRow.user_id, name: localRow.name, email: localRow.email, role: localRow.role, notInPeopleList: true };
+  }
+  // 最後の手段：ローカルの最初の管理者（誰もログインしていない状態でのエディタ実行など）
+  for (var k = 0; k < localUsers.length; k++) {
+    if (localUsers[k].role === 'admin') {
+      return { user_id: localUsers[k].user_id, name: localUsers[k].name, email: localUsers[k].email, role: 'admin', notInPeopleList: true };
+    }
+  }
+  return null;
+}
+
 /* ============ 診断（管理者専用） ============ */
 
 /**
