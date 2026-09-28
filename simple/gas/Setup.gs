@@ -10,6 +10,33 @@
  *   6. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」で公開する
  */
 
+/**
+ * データを置くスプレッドシートを新しく作り、そのIDをスクリプトプロパティに登録する。
+ * スタンドアロンのスクリプト（シートに紐づいていない）で、最初に1度だけ実行する。
+ * すでに登録済みなら何もしない。続けて setup() まで済ませる。
+ */
+function createSpreadsheet() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('SPREADSHEET_ID');
+  if (id) {
+    try {
+      var exist = SpreadsheetApp.openById(id);
+      return 'すでに登録済みです：' + exist.getName() + '\n' + exist.getUrl();
+    } catch (e) {
+      // 登録されているが開けない。作り直してよいか分からないので、ここでは消さずに知らせる
+      throw new Error('SPREADSHEET_ID（' + id + '）が登録されていますが開けません。' +
+        '別のブックを使うなら、スクリプト プロパティからこの値を消してから実行してください。');
+    }
+  }
+  var ss = SpreadsheetApp.create('PJ管理データ');
+  props.setProperty('SPREADSHEET_ID', ss.getId());
+  // 作ったばかりの「シート1」は使わないので、9シートを作ってから消す
+  var msg = setup();
+  var first = ss.getSheetByName('シート1') || ss.getSheetByName('Sheet1');
+  if (first && ss.getSheets().length > 1) ss.deleteSheet(first);
+  return 'スプレッドシートを作り、IDを登録しました。\n' + ss.getUrl() + '\n' + msg;
+}
+
 /** 9シートを作り、ヘッダーと初期設定を入れる。何度実行しても壊れない */
 function setup() {
   Object.keys(SHEETS).forEach(function (name) {

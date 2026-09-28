@@ -569,28 +569,88 @@
               S.templates.map(function (t) { return [t.template_id, t.name]; })), '') + '</select></div>' +
           '<div class="field"><label for="n-start">開始日</label><input id="n-start" type="date" value="' + esc(S.today) + '"></div>' +
         '</div>' +
-        '<div class="field"><label for="n-owner">オーナー</label><select id="n-owner">' +
-          optionList(S.users.map(function (u) { return [u.user_id, u.name]; }), S.me ? S.me.user_id : '') + '</select></div>' +
+        '<div class="row2">' +
+          '<div class="field"><label for="n-owner">オーナー</label><select id="n-owner">' +
+            optionList(S.users.map(function (u) { return [u.user_id, u.name]; }), S.me ? S.me.user_id : '') + '</select></div>' +
+          '<div class="field"><label for="n-end">終了日</label>' +
+            '<input id="n-end" type="date" value="">' +
+            '<div class="help" id="n-end-help">テンプレートを選ぶと、いちばん後ろのタスクから自動で決まります</div></div>' +
+        '</div>' +
         '<div id="n-fields"></div>' +
         '<button class="btn primary" id="n-create">この内容で作成</button>' +
-      '</div></section>';
+      '</div></section>' +
+      '<section class="card" id="n-preview" hidden></section>';
   }
 
   document.addEventListener('change', function (e) {
     if (e.target.id === 'n-tpl') loadTemplateFields(e.target.value);
+    if (e.target.id === 'n-start') renderPreview();
   });
   document.addEventListener('click', function (e) {
     if (e.target.id === 'n-create') createProjectNow();
   });
 
-  var tplFields = [];
+  var tplFields = [], tplItems = [];
+
+  /**
+   * 作られるタスクと、そこから決まる終了日を出す（要件 F-1-6）。
+   * テンプレートの日付は「開始日からの相対日数」なので、開始日を変えると全部ずれる。
+   */
+  function renderPreview() {
+    var box = $('n-preview'), endEl = $('n-end'), help = $('n-end-help');
+    if (!box) return;
+    var start = $('n-start') ? $('n-start').value : '';
+
+    if (!tplItems.length) {
+      box.hidden = true;
+      box.innerHTML = '';
+      if (endEl) { endEl.disabled = false; }
+      if (help) help.textContent = 'テンプレートを使わないので、終了日を入れてください';
+      return;
+    }
+    if (!start) { box.hidden = true; return; }
+
+    var byParent = {};
+    tplItems.forEach(function (t) {
+      if (Number(t.level) !== 2) return;
+      (byParent[t.parent_template_item_id] = byParent[t.parent_template_item_id] || []).push(t);
+    });
+
+    var last = start;
+    function line(t, lv) {
+      var s = H.addDays(start, Number(t.start_offset_days) || 0);
+      var e = H.addDays(s, (Number(t.duration_days) || 1) - 1);
+      if (e > last) last = e;
+      return '<tr><td' + (lv === 2 ? ' style="padding-left:38px;color:var(--text-muted)"' : '') + '>' +
+        (lv === 2 ? '└ ' : '') + esc(t.name) + '</td>' +
+        '<td class="num" style="white-space:nowrap">' + H.formatDate(s) + ' 〜 ' + H.formatDate(e) +
+        ' <span class="faint">' + H.durationDays(s, e) + '日</span></td></tr>';
+    }
+
+    var rows = tplItems.filter(function (t) { return Number(t.level) === 1; }).map(function (t) {
+      return line(t, 1) + (byParent[t.template_item_id] || []).map(function (s) { return line(s, 2); }).join('');
+    }).join('');
+
+    if (endEl) { endEl.value = last; endEl.disabled = true; }
+    if (help) help.textContent = 'テンプレートのいちばん後ろのタスクから自動で決まりました';
+
+    box.hidden = false;
+    box.innerHTML =
+      '<div class="card-head"><h2>作られるタスク</h2><span class="faint">' + tplItems.length + ' 件</span>' +
+        '<span class="spacer"></span><span class="faint">終了日 ' + H.formatDate(last) + '</span></div>' +
+      '<div class="tbl-wrap"><table class="tbl"><colgroup><col><col style="width:260px"></colgroup>' +
+        '<thead><tr><th>タスク</th><th>期間</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
   function loadTemplateFields(templateId) {
-    tplFields = [];
+    tplFields = []; tplItems = [];
     var box = $('n-fields');
-    if (!templateId) { box.innerHTML = ''; return; }
+    if (!templateId) { box.innerHTML = ''; renderPreview(); return; }
     box.innerHTML = '<div class="help">設定項目を読み込んでいます…</div>';
     google.script.run.withSuccessHandler(function (d) {
       tplFields = d.fields;
+      tplItems = d.items || [];
+      renderPreview();
       box.innerHTML = d.fields.length
         ? '<h3 style="margin:18px 0 10px">このテンプレートの設定項目</h3>' + d.fields.map(function (f) {
             var id = 'cf-' + f.field_key, input;
@@ -632,6 +692,7 @@
         name: $('n-name').value,
         template_id: $('n-tpl').value,
         start_date: $('n-start').value,
+        end_date: $('n-end').value,
         owner_user_id: $('n-owner').value,
         custom_fields: cf
       });

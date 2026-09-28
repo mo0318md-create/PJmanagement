@@ -5,10 +5,36 @@
  * 列は「名前」で引く。並び順を変えても、列を足しても壊れない。
  */
 
-/** スプレッドシートを開く。スタンドアロンで使うときはスクリプトプロパティに ID を入れる */
+/**
+ * このアプリのデータを置くスプレッドシートを開く。
+ *
+ * - シートに紐づいたスクリプトなら、そのシートをそのまま使う
+ * - スタンドアロンのスクリプトなら、スクリプトプロパティ `SPREADSHEET_ID` のブックを使う
+ *
+ * どちらでもないときに `null` を返すと、あとの `getSheetByName` で
+ * 「null の getSheetByName は読めません」という分かりにくいエラーになる。
+ * ここで、何をすればよいかまで言って止める。
+ */
 function SS_() {
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActive();
+  if (id) {
+    try {
+      return SpreadsheetApp.openById(id);
+    } catch (e) {
+      throw new Error('スクリプトプロパティ SPREADSHEET_ID（' + id + '）のスプレッドシートを開けません。' +
+        'IDが正しいか、このアカウントに閲覧権限があるかを確認してください。元のエラー: ' +
+        String((e && e.message) || e));
+    }
+  }
+
+  var active = SpreadsheetApp.getActive();
+  if (active) return active;
+
+  throw new Error(
+    'データを置くスプレッドシートが決まっていません。次のどちらかをしてください。\n' +
+    '（1） エディタで createSpreadsheet() を実行する … 新しいブックを作り、IDを自動で登録します\n' +
+    '（2） すでにブックがあるなら、プロジェクトの設定 ▸ スクリプト プロパティ に ' +
+    'SPREADSHEET_ID としてそのIDを登録する');
 }
 
 /** シート名と列の定義。ここが唯一の正 */

@@ -283,13 +283,22 @@ function createProject(data) {
           .sort(function (a, b) { return a.sort_order - b.sort_order; })
       : [];
 
-    // 終了日はテンプレートのいちばん後ろのタスクから決める
-    var endDate = data.start_date;
-    tplItems.forEach(function (t) {
-      var s = hAddDays_(data.start_date, Number(t.start_offset_days) || 0);
-      var e = hAddDays_(s, (Number(t.duration_days) || 1) - 1);
-      if (e > endDate) endDate = e;
-    });
+    // 終了日の決め方
+    //  - テンプレートあり … いちばん後ろのタスクから自動で決める（要件 F-1-2）
+    //  - テンプレートなし … 並べるタスクが無いので、入力してもらう（F-1-11）
+    var endDate;
+    if (tplItems.length) {
+      endDate = data.start_date;
+      tplItems.forEach(function (t) {
+        var s = hAddDays_(data.start_date, Number(t.start_offset_days) || 0);
+        var e = hAddDays_(s, (Number(t.duration_days) || 1) - 1);
+        if (e > endDate) endDate = e;
+      });
+    } else {
+      endDate = data.end_date || '';
+      if (!endDate) throw new Error('終了日は必須です（テンプレートを使わない場合は自動で決まりません）');
+      if (endDate < data.start_date) throw new Error('開始日が終了日より後になっています');
+    }
 
     var pid = uuid_();
     var project = {
