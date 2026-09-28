@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>画面モック一覧｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+</head>
+<body>
+<div class="hub">
+
+  <div class="page-head">
+    <div>
+      <h1>プロジェクト管理システム ─ 画面モック</h1>
+      <div class="sub">要件定義フェーズの確認用モックです。ダミーデータで実際に動きます（サーバー不要）。</div>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="theme">◐ ライト／ダーク</button>
+  </div>
+
+  <div class="callout" style="margin-bottom:22px">
+    日付は<b>開いた日を「今日」として自動生成</b>されます。いつ開いても
+    「遅延1件・注意1件・順調2件・開始前1件・完了1件」の状態が再現されるので、色や判定の見え方を確認できます。
+  </div>
+
+  <div class="callout small" style="margin-bottom:18px">番号はキャンバス（画面設計）と共通です。⑳〜㉓（タブレット・スマホ版）はキャンバスだけにあり、ローカルでは各画面が幅に合わせて並び替わります。</div>
+
+  <h2 style="margin:0 0 10px">プロジェクト単位</h2>
+  <div class="hub-grid" style="margin-bottom:22px">
+    <a class="hub-card" href="dashboard-manager.html">
+      <div class="n">①</div>
+      <div class="t">プロジェクト一覧</div>
+      <div class="d">健全性・進捗・当初比の一覧。件数サマリ、絞り込み、アーカイブも表示。</div>
+    </a>
+    <a class="hub-card" href="portfolio.html">
+      <div class="n">②</div>
+      <div class="t">全プロジェクトのガント</div>
+      <div class="d">全プロジェクトを1本の時間軸に。予実2段、行を開くとタスクまで。</div>
+    </a>
+    <a class="hub-card" href="project-detail.html?id=p1">
+      <div class="n">③</div>
+      <div class="t">プロジェクト概要</div>
+      <div class="d">概要・タスクツリー・ガント・当初計画をまとめたプロジェクト詳細。</div>
+    </a>
+    <a class="hub-card" href="board.html?id=p1">
+      <div class="n">④</div>
+      <div class="t">ボード</div>
+      <div class="d">ステータス列のカンバン。ドラッグでステータス変更。</div>
+    </a>
+    <a class="hub-card" href="list.html?id=p1">
+      <div class="n">⑤</div>
+      <div class="t">リスト</div>
+      <div class="d">表で一覧。ステータス／担当者／マイルストーン／ラベルでまとめる。</div>
+    </a>
+    <a class="hub-card" href="project-detail.html?id=p1#gantt">
+      <div class="n">⑥</div>
+      <div class="t">ガント</div>
+      <div class="d">1プロジェクト内のガント。予実2段・マイルストーン◆・今日線。</div>
+    </a>
+    <a class="hub-card" href="project-detail.html?id=p1#bl-card">
+      <div class="n">⑦</div>
+      <div class="t">当初計画</div>
+      <div class="d">計画確定、比較する版、引き直し（全体／選んだタスク）、履歴。</div>
+    </a>
+    <a class="hub-card" href="project-settings.html?id=p1">
+      <div class="n">⑧</div>
+      <div class="t">プロジェクト設定</div>
+      <div class="d">基本情報・固有項目・ステータス列・マイルストーン・アーカイブ。</div>
+    </a>
+    <a class="hub-card" href="project-new.html">
+      <div class="n">⑨</div>
+      <div class="t">プロジェクト作成</div>
+      <div class="d">テンプレートを選ぶとタスク構成と日付が展開される。</div>
+    </a>
+  </div>
+
+  <h2 style="margin:0 0 10px">タスク・テンプレート</h2>
+  <div class="hub-grid" style="margin-bottom:22px">
+    <a class="hub-card" href="task-edit.html?id=i102">
+      <div class="n">⑩</div>
+      <div class="t">タスクの編集（タスク詳細）</div>
+      <div class="d">期間・ステータス・重さ・実績日・マイルストーン・ラベル。判定プレビュー。</div>
+    </a>
+    <a class="hub-card" href="search.html">
+      <div class="n">⑪</div>
+      <div class="t">横断検索・保存フィルタ</div>
+      <div class="d">プロジェクトをまたいで絞り込み。保存フィルタの名前・共有・削除。</div>
+    </a>
+    <a class="hub-card" href="template-edit.html?id=tpl_web">
+      <div class="n">⑫</div>
+      <div class="t">テンプレート編集</div>
+      <div class="d">タスク構成・ステータス列・種別・固有項目。（一覧は template-list.html）</div>
+    </a>
+  </div>
+
+  <h2 style="margin:0 0 10px">担当者単位</h2>
+  <div class="hub-grid" style="margin-bottom:22px">
+    <a class="hub-card" href="workload.html">
+      <div class="n">⑬</div>
+      <div class="t">担当者一覧・負荷</div>
+      <div class="d">人ごとの未完了・遅延・重さと週ごとの負荷（負荷率／人日／件数）。</div>
+    </a>
+    <a class="hub-card" href="people-timeline.html">
+      <div class="n">⑭</div>
+      <div class="t">担当者別ガント</div>
+      <div class="d">担当者 ＞ PJ ＞ タスク。予実2段・負荷の色帯・ドラッグで付け替え。</div>
+    </a>
+    <a class="hub-card" href="member.html?user=u3">
+      <div class="n">⑮</div>
+      <div class="t">個人ページ</div>
+      <div class="d">1人分の担当・週ごとの負荷・関わるPJ・担当分のガント。</div>
+    </a>
+    <a class="hub-card" href="my-tasks.html">
+      <div class="n">⑯</div>
+      <div class="t">マイタスク</div>
+      <div class="d">自分の担当を遅延／今日／今週／以降／完了で。</div>
+    </a>
+  </div>
+
+  <h2 style="margin:0 0 10px">共通・管理</h2>
+  <div class="hub-grid" style="margin-bottom:22px">
+    <a class="hub-card" href="settings.html">
+      <div class="n">⑰</div>
+      <div class="t">設定</div>
+      <div class="d">判定・作業の重さ・ユーザーと稼働・休み／祝日・ラベル・お知らせ。</div>
+    </a>
+    <a class="hub-card" href="dashboard-manager.html">
+      <div class="n">⑱</div>
+      <div class="t">お知らせ</div>
+      <div class="d">各画面のヘッダーのベル（未読数と一覧）。</div>
+    </a>
+    <a class="hub-card" href="rules.html">
+      <div class="n">⑲</div>
+      <div class="t">判定ルール</div>
+      <div class="d">予定進捗・健全性・当初計画・予実・負荷の計算式と色の決まり。</div>
+    </a>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>ダミーデータの内容</h2></div>
+    <div class="card-body tight">
+      <table class="tbl">
+        <thead><tr><th>プロジェクト</th><th>判定モード</th><th>期間</th><th>健全性</th><th class="col-hide">ねらい</th></tr></thead>
+        <tbody id="data-rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>判定ロジックの要約</h2></div>
+    <div class="card-body">
+      <p class="small">期間は両端を含む日数で数えます。</p>
+      <pre class="small" style="background:var(--surface-2);padding:12px;border-radius:8px;overflow:auto;margin:0 0 14px"><code>予定進捗率 = clamp((今日 - 開始日 + 1) / (終了日 - 開始日 + 1), 0, 1)
+差分       = 実績進捗率 - 予定進捗率</code></pre>
+
+      <h3 style="margin-bottom:6px">実績進捗率の求め方（3モードから選択）</h3>
+      <table class="tbl" style="margin-bottom:16px">
+        <thead><tr><th>モード</th><th>求め方</th></tr></thead>
+        <tbody>
+          <tr><td class="nowrap"><b>自動集計</b><div class="small muted">auto（既定）</div></td>
+            <td class="small">完了なら100%。子を持つなら子の平均。子を持たないならステータス換算（未着手0% / 進行中・保留50% / 完了100%）。</td></tr>
+          <tr><td class="nowrap"><b>進捗率手入力</b><div class="small muted">manual</div></td>
+            <td class="small">入力された進捗率を使う。未入力のタスクは自動集計にフォールバック。</td></tr>
+          <tr><td class="nowrap"><b>終了日超過のみ</b><div class="small muted">deadline</div></td>
+            <td class="small">進捗率を使わず、終了日を過ぎて未完了のものだけを遅延と判定。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-bottom:6px">健全性の判定（上から順に評価）</h3>
+      <table class="tbl">
+        <thead><tr><th>条件</th><th>結果</th></tr></thead>
+        <tbody>
+          <tr><td class="small">ステータス = 完了</td><td><span class="badge done"><span class="ico">✓</span>完了</span></td></tr>
+          <tr><td class="small">今日 &lt; 開始日</td><td><span class="badge not_started"><span class="ico">・</span>開始前</span></td></tr>
+          <tr><td class="small">今日 &gt; 終了日（未完了）</td><td><span class="badge delayed"><span class="ico">!</span>遅延</span></td></tr>
+          <tr><td class="small">差分 ≧ -10pt</td><td><span class="badge on_track"><span class="ico">●</span>順調</span></td></tr>
+          <tr><td class="small">差分 ≧ -25pt</td><td><span class="badge at_risk"><span class="ico">▲</span>注意</span></td></tr>
+          <tr><td class="small">上記以外</td><td><span class="badge delayed"><span class="ico">!</span>遅延</span></td></tr>
+        </tbody>
+      </table>
+      <p class="small muted" style="margin-top:10px">
+        しきい値は設定画面で変更できます。親（プロジェクト・タスク）の健全性は<b>自身の期間</b>で判定し、
+        子の遅延は伝播させず「配下の遅延件数」として別に表示します。
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>設計ドキュメント</h2></div>
+    <div class="card-body">
+      <ul style="margin:0;padding-left:20px">
+        <li><a href="../docs/requirements.md">機能要件書（docs/requirements.md）</a> ─ 機能ID付きの要件一覧と画面対応表</li>
+        <li><a href="../docs/data-model.md">データモデル設計書（docs/data-model.md）</a> ─ シート定義、Firestore移行マッピング</li>
+      </ul>
+      <p class="small muted" style="margin-top:10px">
+        ※ ブラウザによっては .md がダウンロードになります。その場合はエディタで開いてください。
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>モックの構成</h2></div>
+    <div class="card-body">
+      <pre class="small" style="background:var(--surface-2);padding:12px;border-radius:8px;overflow:auto;margin:0"><code>mocks/
+├── index.html            この画面
+├── assets/
+│   ├── mock.css          共通スタイル（健全性の配色トークン）
+│   ├── health.js         判定ロジック ★本実装でもそのまま流用する
+│   ├── mock-data.js      ダミーデータ
+│   └── mock-ui.js        ヘッダー／ナビ／バッジ／進捗バー
+└── *.html                各画面</code></pre>
+      <p class="small muted" style="margin-top:10px">
+        ビルド不要のバニラJSです。GASへ移す際は HtmlService の <code>include()</code> で
+        css / js を結合し、データ取得部分だけ <code>google.script.run</code> に差し替えます。
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+
+  var t = null;
+  try { t = localStorage.getItem('pm_mock_theme'); } catch (e) { }
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('theme').addEventListener('click', U.toggleTheme);
+
+  var AIM = {
+    p1: '終了日超過のタスクを含み、全体が大きく遅れているケース',
+    p2: '期限内だが予定より遅れ気味の「注意」ケース。今日期限の子タスクあり',
+    p3: '予定どおり進んでいる標準ケース',
+    p4: '進捗率手入力モードのケース（各タスクに%を保持）',
+    p5: '開始日前でまだ動いていないケース。テンプレート未使用',
+    p6: '全タスク完了済みのケース'
+  };
+
+  document.getElementById('data-rows').innerHTML = U.allProjectTrees().map(function (tree) {
+    return '<tr>' +
+      '<td><a class="row-link" href="project-detail.html?id=' + tree.projectId + '">' + U.esc(tree.name) + '</a>' +
+        '<div class="small muted">' + U.esc(tree.templateName) + '</div></td>' +
+      '<td class="small nowrap">' + H.MODE_LABEL[tree.calc.mode] + '</td>' +
+      '<td>' + U.periodText(tree.startDate, tree.endDate) + '</td>' +
+      '<td>' + U.healthBadge(tree.calc.health) + '</td>' +
+      '<td class="small muted col-hide">' + U.esc(AIM[tree.projectId] || '') + '</td>' +
+      '</tr>';
+  }).join('');
+})();
+</script>
+</body>
+</html>

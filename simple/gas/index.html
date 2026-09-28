@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <base target="_top">
+  <?!= include('css'); ?>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">P</span>PJ管理</div>
+    <span class="spacer"></span>
+    <button type="button" class="icon-btn" id="btn-bell" aria-label="お知らせ">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+      <span class="bell-dot" id="bell-dot" hidden></span>
+    </button>
+    <span class="today" id="today">—</span>
+    <span class="me" id="me">—</span>
+  </header>
+
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main" id="main">
+      <div class="loading">読み込んでいます…</div>
+    </main>
+  </div>
+</div>
+
+<div class="backdrop" id="backdrop" hidden></div>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title"></div>
+<div class="toast" id="toast" hidden></div>
+
+<?!= include('health'); ?>
+<?!= include('app'); ?>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リスト｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .grp-row td { background: var(--surface-2); font-weight: 700; font-size: 12px; }
+  .lbl { font-size: 10px; border-radius: 4px; padding: 1px 6px; color: #34302b; white-space: nowrap; }
+  tr.lv2 td:first-child { padding-left: 34px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb">—</div>
+      <div class="page-head">
+        <div><h1 id="title">リスト</h1><div class="sub">タスク・子タスクを表で見ます。まとめ方を切り替え、その場でステータスを変えられます</div></div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>タスク</h2><span class="chip" id="cnt">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label for="f-group">まとめ方</label>
+            <select class="inline" id="f-group">
+              <option value="status">ステータス</option><option value="assignee">担当者</option>
+              <option value="milestone">マイルストーン</option><option value="label">ラベル</option>
+            </select>
+            <label class="check-line small"><input type="checkbox" id="f-delayed"> 遅延のみ</label>
+            <label class="check-line small"><input type="checkbox" id="f-subs" checked> 子タスクも表示</label>
+          </div>
+        </div>
+        <div class="card-body tight">
+          <table class="tbl">
+            <thead><tr><th>タスク</th><th>ステータス</th><th>担当者</th><th class="col-hide">期間</th><th>期限</th><th style="width:180px">進捗（実績／予定）</th><th>健全性</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>キャンバスの ⑤ に対応。まとめ方：ステータス／担当者／マイルストーン／ラベル（ラベルは複数付くので、同じタスクが複数のまとまりに出ます）。</li>
+          <li>ステータスの選択肢はこのプロジェクトのステータス列です。変えると健全性・進捗をその場で再計算します（モックでは画面上だけ）。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script src="assets/project-tabs.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'dashboard', view: 'project' });
+  var project = D.projectById(U.qs('id', 'p1')) || D.projects[0];
+  U.projectTabs(project, 'list');
+
+  function render() {
+    var tree = U.projectTree(project);
+    var by = document.getElementById('f-group').value;
+    var onlyDelayed = document.getElementById('f-delayed').checked;
+    var withSubs = document.getElementById('f-subs').checked;
+    var nodes = H.flatten(tree).filter(function (n) {
+      if (!withSubs && n.level === 2) return false;
+      if (onlyDelayed && n.calc.health !== 'delayed') return false;
+      return true;
+    });
+
+    var groups = [];
+    if (by === 'status') {
+      groups = H.statusesOf(project).map(function (s) { return { label: s.label + '（' + H.CATEGORY_LABEL[s.category] + '）', items: nodes.filter(function (n) { return n.statusKey === s.key; }) }; });
+    } else if (by === 'assignee') {
+      groups = D.users.map(function (u) { return { label: u.name, items: nodes.filter(function (n) { return n.assigneeUserId === u.userId; }) }; })
+        .concat([{ label: '未アサイン', items: nodes.filter(function (n) { return !n.assigneeUserId; }) }]);
+    } else if (by === 'milestone') {
+      groups = D.milestonesOf(project.projectId).map(function (m) { return { label: '◆ ' + m.name + '（' + H.formatDate(m.date) + '）', items: nodes.filter(function (n) { return n.milestoneId === m.milestoneId; }) }; })
+        .concat([{ label: 'マイルストーンなし', items: nodes.filter(function (n) { return !n.milestoneId; }) }]);
+    } else {
+      groups = D.labels.map(function (l) { return { label: l.name, items: nodes.filter(function (n) { return (n.labelIds || []).indexOf(l.labelId) >= 0; }) }; })
+        .concat([{ label: 'ラベルなし', items: nodes.filter(function (n) { return !(n.labelIds || []).length; }) }]);
+    }
+    groups = groups.filter(function (g) { return g.items.length; });
+
+    document.getElementById('cnt').textContent = nodes.length + ' 件';
+    var statuses = H.statusesOf(project);
+    document.getElementById('rows').innerHTML = groups.map(function (g) {
+      return '<tr class="grp-row"><td colspan="7">' + U.esc(g.label) + ' <span class="chip">' + g.items.length + '</span></td></tr>' +
+        g.items.map(function (n) {
+          var labels = (n.labelIds || []).map(function (id) { var l = D.labelById(id); return l ? '<span class="lbl" style="background:' + l.color + '">' + U.esc(l.name) + '</span>' : ''; }).join(' ');
+          return '<tr class="lv' + n.level + '">' +
+            '<td><a class="row-link" href="task-edit.html?id=' + n.itemId + '">' + U.esc(n.name) + '</a> ' + labels + '</td>' +
+            '<td><select class="inline" data-item="' + n.itemId + '" aria-label="ステータス">' + statuses.map(function (s) {
+              return '<option value="' + s.key + '"' + (s.key === n.statusKey ? ' selected' : '') + '>' + U.esc(s.label) + '</option>';
+            }).join('') + '</select></td>' +
+            '<td class="small">' + (n.assigneeUserId ? U.esc(D.userName(n.assigneeUserId)) : '<span class="faint">未アサイン</span>') + '</td>' +
+            '<td class="col-hide">' + U.periodText(n.startDate, n.endDate) + '</td>' +
+            '<td>' + U.dueText(n.calc, n.endDate) + '</td>' +
+            '<td>' + U.progressBar(n.calc) + '</td>' +
+            '<td>' + U.healthBadge(n.calc.health) + '</td></tr>';
+        }).join('');
+    }).join('') || '<tr><td colspan="7"><div class="empty">該当するタスクはありません</div></td></tr>';
+
+    document.querySelectorAll('select[data-item]').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var it = D.itemById(sel.getAttribute('data-item')), cat = H.statusCategory(project, sel.value);
+        it.statusKey = sel.value;
+        if (cat !== 'not_started' && !it.actualStartDate) it.actualStartDate = D.today;
+        it.actualEndDate = cat === 'done' ? (it.actualEndDate || D.today) : null;
+        render();
+      });
+    });
+  }
+  ['f-group', 'f-delayed', 'f-subs'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
+  render();
+})();
+</script>
+</body>
+</html>

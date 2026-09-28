@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>お知らせ｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .n-row { display: flex; gap: 11px; padding: 12px 14px; border-bottom: 1px solid var(--border); align-items: flex-start; }
+  .n-row:hover { background: var(--surface-2); }
+  .n-row.unread { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+  .n-row .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; flex-shrink: 0; background: transparent; }
+  .n-row.unread .dot { background: var(--accent); }
+  .n-kind { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0; font-size: 14px; }
+  .n-kind.delayed { color: var(--h-delayed); background: var(--h-delayed-bg); }
+  .n-kind.due { color: var(--h-at-risk); background: var(--h-at-risk-bg); }
+  .n-kind.assigned, .n-kind.unassigned { color: var(--accent); background: var(--accent-soft); }
+  .n-body { flex: 1; min-width: 0; }
+  .n-body .t { font-size: 15px; line-height: 1.5; }
+  .n-row.unread .t { font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>お知らせ</h1>
+          <div class="sub" id="sub">ヘッダーのベルから開きます。画面の中だけの知らせで、メールやチャットには送りません</div></div>
+        <span class="spacer"></span>
+        <div class="btn-row">
+          <button class="btn" id="btn-read">すべて既読にする</button>
+          <a class="btn" href="settings.html">お知らせの設定</a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2 id="who">—</h2><span class="tag" id="count">—</span>
+          <span class="spacer"></span>
+          <label class="small muted"><input type="checkbox" id="f-unread"> 未読だけ</label>
+        </div>
+        <div class="card-body tight" id="list"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-9（画面内のお知らせ）</li>
+          <li>作られ方は2通りです。<strong>担当の変更</strong>は保存したその場で、<strong>期限と遅延</strong>は毎朝のトリガーでまとめて作ります。</li>
+          <li>90日より古いものは、同じ朝のトリガーで消します（行が際限なく増えないようにするためです）。日数は設定で変えられます。</li>
+          <li>ヘッダー右の名前を切り替えると、その人宛のお知らせに変わります。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: null, view: 'project' });
+
+  var me = D.me();
+  document.getElementById('who').textContent = me.name + ' さん宛て';
+
+  document.getElementById('f-unread').addEventListener('change', render);
+  document.getElementById('btn-read').addEventListener('click', function () {
+    D.notificationsOf(D.meUserId).forEach(function (n) { n.read = true; });
+    render();
+    U.renderShell({ active: null, view: 'project' });
+  });
+
+  function render() {
+    var all = D.notificationsOf(D.meUserId);
+    var list = document.getElementById('f-unread').checked
+      ? all.filter(function (n) { return !n.read; }) : all;
+    document.getElementById('count').textContent =
+      all.filter(function (n) { return !n.read; }).length + ' / ' + all.length + ' 未読';
+
+    document.getElementById('list').innerHTML = list.length
+      ? list.map(function (n) {
+          var k = D.NOTIFY_KINDS[n.kind] || { label: n.kind, icon: '・' };
+          var href = n.itemId ? 'task-edit.html?id=' + n.itemId
+            : n.projectId ? 'project.html?id=' + n.projectId : '#';
+          var p = n.projectId ? D.projectById(n.projectId) : null;
+          return '<div class="n-row' + (n.read ? '' : ' unread') + '">' +
+            '<span class="dot"></span>' +
+            '<span class="n-kind ' + n.kind + '" title="' + U.esc(k.label) + '">' + k.icon + '</span>' +
+            '<div class="n-body">' +
+              '<div class="t"><a class="row-link" href="' + href + '">' + U.esc(n.title) + '</a></div>' +
+              '<div class="small muted">' + U.esc(k.label) +
+                (p ? ' ・ ' + U.esc(p.key) + ' ' + U.esc(p.name) : '') +
+                ' ・ ' + U.esc(n.createdAt.replace('T', ' ')) + '</div>' +
+            '</div></div>';
+        }).join('')
+      : '<div class="empty">お知らせはありません</div>';
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

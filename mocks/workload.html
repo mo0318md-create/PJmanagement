@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>担当者別の負荷｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .wl-grid { display: grid; grid-template-columns: repeat(var(--weeks), minmax(48px, 1fr)); gap: 4px; }
+  .wl-cell { display: flex; align-items: center; justify-content: center; height: 28px; border-radius: 5px;
+    font-size: 12px; font-variant-numeric: tabular-nums; background: var(--surface-2); color: var(--text-faint); border: 1px solid var(--border); }
+  .wl-cell.l1 { background: var(--h-on-track-bg); color: var(--h-on-track); border-color: transparent; }
+  .wl-cell.l3 { background: var(--h-at-risk-bg); color: var(--h-at-risk); border-color: transparent; font-weight: 700; }
+  .wl-cell.l4 { background: var(--h-delayed-bg); color: var(--h-delayed); border-color: transparent; font-weight: 700; }
+  .wl-cell.now { outline: 2px solid var(--text); outline-offset: -2px; }
+  .wl-head { font-size: 11px; text-align: center; color: var(--text-muted); white-space: nowrap; }
+  .wl-head.now { font-weight: 700; color: var(--text); }
+  .wl-flag { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  .wl-flag.bad { color: var(--h-delayed); background: var(--h-delayed-bg); }
+  .wl-flag.good { color: var(--h-on-track); background: var(--h-on-track-bg); }
+  .wl-detail td { background: var(--surface-2); }
+  .wl-detail ul { margin: 0; padding-left: 18px; }
+  .wl-detail li { margin: 4px 0; }
+  .tbl td.n, .tbl th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .zero { color: var(--text-faint); }
+  .wl-scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="page-head">
+        <div>
+          <h1>担当者別の負荷</h1>
+          <div class="sub">担当者単位 ─ タスクが誰に偏っているかを、件数と作業の重さで見ます。名前をクリックすると個人ページへ移ります</div>
+        </div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <a href="workload.html" class="active">負荷の一覧</a>
+        <a href="people-timeline.html">ガント</a>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>担当者</h2>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label for="f-metric">表のマスに出す数字</label>
+            <select class="inline" id="f-metric">
+              <option value="rate">負荷率（%）</option>
+              <option value="effort">負荷（人日）</option>
+              <option value="count">件数（同時進行数）</option>
+            </select>
+            <label for="f-sort">並び順</label>
+            <select class="inline" id="f-sort">
+              <option value="peak">負荷の高い順</option>
+              <option value="delayed">遅延の多い順</option>
+              <option value="open">未完了の多い順</option>
+              <option value="name">名前順</option>
+            </select>
+            <label for="f-weeks">表示週数</label>
+            <select class="inline" id="f-weeks">
+              <option value="4">4週</option>
+              <option value="6" selected>6週</option>
+              <option value="8">8週</option>
+            </select>
+          </div>
+        </div>
+        <div class="callout small" id="metric-desc" style="margin:10px 14px 0">—</div>
+        <div class="card-body tight wl-scroll">
+          <table class="tbl">
+            <thead id="thead"></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <div class="card-head small muted" style="border-bottom:none;border-top:1px solid var(--border);gap:12px;flex-wrap:wrap">
+          <span id="legend-text"></span>
+          <span class="spacer"></span>
+          <span>太枠が今週 ・ 行をクリックで内訳</span>
+        </div>
+      </div>
+
+      <div class="card" id="unassigned-card">
+        <div class="card-head"><h2>未アサインのタスク</h2><span class="chip" id="un-count">—</span></div>
+        <div class="card-body tight">
+          <table class="tbl"><tbody id="unassigned"></tbody></table>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-4-13（担当者別の負荷）／F-4-12（マスに出す数字）／F-2-16（作業の重さ）。弱点3「工数・リソースが見えない」への対応です。</li>
+          <li>1件の重さ（人日）は、<strong>予定工数(h) ＞ サイズ(S/M/L/XL) ＞ 期間からの自動推定</strong>の順に決まります。未入力でも推定値が出るので、画面が空になるタスクはありません。推定値はうす字＋「推定」で表示し、直すと濃字になります。</li>
+          <li>重さは期間に均等に配ります。例: 6人日の作業が12日間なら1日あたり0.5人日。週ごとにその分を足し、週の稼働（既定5人日）で割ると負荷率になります。</li>
+          <li>数える単位は「作業単位」＝子タスク、または子を持たないタスク。子を持つタスクは中身と二重になるので数えません。完了とアーカイブ済みプロジェクトは除きます。</li>
+          <li>期限を過ぎて未完了のものは「今日まで続いている」とみなし、その分だけ期間を延ばして配ります（放置しても負荷が消えないようにするため）。</li>
+          <li>親・プロジェクトの進捗率の重みを、期間日数から重さに切り替えるかは設定（<code>rollupWeight</code>）で選べます。既定は従来どおり期間日数です。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script src="assets/load.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'workload', view: 'people' });
+
+  var OVERLOAD = D.settings.overloadThreshold || 4;
+
+  // ---- 作業単位（葉）を集める：完了・アーカイブ済みプロジェクトは除く ----
+  var units = [];
+  U.allProjectTrees().forEach(function (tree) {
+    if (tree.archived) return;
+    H.flatten(tree).forEach(function (node) {
+      if (node.level === 0) return;
+      if (node.children && node.children.length) return;
+      if (node.statusCategory === H.CATEGORY.DONE) return;
+      units.push({ node: node, project: tree, bucket: H.dueBucket(node, D.today, D.settings.weekRangeDays) });
+    });
+  });
+
+  var week0 = U.mondayOf(D.today);
+
+  function build(weeks) {
+    return D.users.filter(function (u) { return u.active; }).map(function (u) {
+      var mine = units.filter(function (x) { return x.node.assigneeUserId === u.userId; });
+      var wl = U.weekLoads(mine, u.userId, weeks, week0);
+      var projects = {};
+      mine.forEach(function (x) { projects[x.project.projectId] = true; });
+      return {
+        user: u,
+        items: mine,
+        open: mine.length,
+        delayed: mine.filter(function (x) { return x.node.calc.health === 'delayed'; }).length,
+        today: mine.filter(function (x) { return x.bucket === 'today'; }).length,
+        week: mine.filter(function (x) { return x.bucket === 'week'; }).length,
+        estimated: mine.filter(function (x) { return x.node.calc.effortSource === 'auto'; }).length,
+        totalEffort: mine.reduce(function (s, x) { return s + x.node.calc.effortDays; }, 0),
+        projects: Object.keys(projects).length,
+        capWeek: U.capacityPerWeek(u.userId),
+        weeksInfo: wl,
+        count: wl.map(function (w) { return w.count; }),
+        effort: wl.map(function (w) { return w.load; }),
+        rates: wl.map(function (w) { return w.rate; })
+      };
+    });
+  }
+
+  // ---- 表示する指標の切替 ----
+  var r1 = function (v) { return Math.round(v * 10) / 10; };
+  var METRIC = {
+    count: {
+      values: function (r) { return r.count; },
+      text: function (v) { return String(v); },
+      level: function (v) { return v >= OVERLOAD ? 'l4' : v === OVERLOAD - 1 ? 'l3' : v >= 1 ? 'l1' : ''; },
+      tip: function (v) { return '同時に ' + v + ' 件'; },
+      head: '週ごとの同時進行数',
+      desc: '<strong>件数</strong>：その週に期間がかかっているタスクの数です。1件ごとの重さの違いは見ません。',
+      legend: '1〜2件＝緑、' + (OVERLOAD - 1) + '件＝黄、' + OVERLOAD + '件以上＝赤'
+    },
+    effort: {
+      values: function (r) { return r.effort; },
+      text: function (v) { return v ? r1(v) : '—'; },
+      level: function (v, w) { return v > w.cap ? 'l4' : v >= w.cap * 0.7 ? 'l3' : v > 0 ? 'l1' : ''; },
+      tip: function (v, w) { return 'この週にかかる負荷 ' + r1(v) + '人日 ／ この人のこの週の稼働 ' + r1(w.cap) + '人日'; },
+      head: '週ごとの負荷（人日）',
+      desc: '<strong>負荷（人日）</strong>：その週にかかる負荷の合計です。各タスクの重さ（人日）を、期間の稼働日（土日・祝日を除く）に均等に配って足しています。',
+      legend: 'その人のその週の稼働に対して、7割未満＝緑、7割〜ちょうど＝黄、超過＝赤'
+    },
+    rate: {
+      values: function (r) { return r.rates; },
+      text: function (v) { return v ? Math.round(v * 100) + '%' : '—'; },
+      level: function (v) { return v > 1 ? 'l4' : v >= 0.7 ? 'l3' : v > 0 ? 'l1' : ''; },
+      tip: function (v, w) { return '負荷 ' + r1(w.load) + '人日 ÷ 稼働 ' + r1(w.cap) + '人日 ＝ ' + Math.round(v * 100) + '%'; },
+      head: '週ごとの負荷率',
+      desc: '<strong>負荷率（%）</strong>：その週の負荷が、その人のその週の稼働の何％にあたるかです。稼働は人ごとの「週の稼働人日」から祝日・会社休日・本人の休みを差し引いて求めます（設定画面で変更）。100%を超える週は入り切りません。',
+      legend: '70%未満＝緑、70〜100%＝黄、100%超＝赤（分母はその人のその週の稼働）'
+    }
+  };
+
+  var openRow = null;
+
+  function render() {
+    var weeks = +document.getElementById('f-weeks').value;
+    var sort = document.getElementById('f-sort').value;
+    var m = METRIC[document.getElementById('f-metric').value];
+    var rows = build(weeks);
+
+    rows.forEach(function (r) {
+      r.vals = m.values(r);
+      r.levels = r.vals.map(function (v, i) { return m.level(v, r.weeksInfo[i]); });
+      r.peak = m === METRIC.effort ? Math.max.apply(null, r.rates.concat([0])) : Math.max.apply(null, r.vals.concat([0]));
+      var heavy = r.levels.filter(function (l) { return l === 'l4'; }).length;
+      // 余力あり＝表示期間中どの週も「黄」に届かない
+      var free = r.levels.every(function (l) { return l !== 'l3' && l !== 'l4'; });
+      r.flag = heavy >= 2 ? ['bad', '稼働超過'] : r.delayed >= 2 ? ['bad', '遅延集中']
+        : (free ? ['good', '余力あり'] : null);
+    });
+
+    if (sort === 'peak') rows.sort(function (a, b) { return (b.peak - a.peak) || (b.open - a.open); });
+    else if (sort === 'delayed') rows.sort(function (a, b) { return (b.delayed - a.delayed) || (b.open - a.open); });
+    else if (sort === 'open') rows.sort(function (a, b) { return b.open - a.open; });
+    else rows.sort(function (a, b) { return a.user.name.localeCompare(b.user.name, 'ja'); });
+
+    // ---- サマリ ----
+    var unassigned = units.filter(function (x) { return !x.node.assigneeUserId; });
+    var delayed = rows.reduce(function (s, r) { return s + r.delayed; }, 0);
+    var estimated = units.filter(function (x) { return x.node.calc.effortSource === 'auto'; }).length;
+    var totalEffort = units.reduce(function (s, x) { return s + x.node.calc.effortDays; }, 0);
+    var over = rows.filter(function (r) { return r.levels[0] === 'l4'; });
+    var free = rows.filter(function (r) { return r.flag && r.flag[1] === '余力あり'; });
+    function names(list) { return list.map(function (r) { return r.user.name.split(' ')[0] + 'さん'; }).join('・') || '—'; }
+
+    document.getElementById('stats').innerHTML = [
+      ['', '残っている重さ', Math.round(totalEffort * 10) / 10, '人日', units.length + '件 ／ うち推定のまま ' + estimated + '件'],
+      ['delayed', '遅延中', delayed, '件', rows.filter(function (r) { return r.delayed; }).length + '人に分散 ／ 未アサイン ' + unassigned.length + '件'],
+      ['at_risk', '今週 稼働超過', over.length, '人', names(over)],
+      ['on_track', '余力あり', free.length, '人', names(free)]
+    ].map(function (s) {
+      return '<div class="stat ' + s[0] + '"><div class="label">' + U.esc(s[1]) + '</div>' +
+        '<div class="value num">' + s[2] + '<span class="unit">' + s[3] + '</span></div>' +
+        '<div class="small faint">' + U.esc(s[4]) + '</div></div>';
+    }).join('');
+
+    // ---- 表 ----
+    var heads = [];
+    for (var i = 0; i < weeks; i++) {
+      var wsI = H.addDays(week0, i * 7);
+      var hol = D.holidays.filter(function (h) { return h.date >= wsI && h.date <= H.addDays(wsI, 6); });
+      heads.push('<span class="wl-head' + (i === 0 ? ' now' : '') + '"' +
+        (hol.length ? ' title="' + U.esc(hol.map(function (h) { return H.formatDate(h.date) + ' ' + h.name; }).join('、')) + '"' : '') + '>' +
+        H.formatDate(wsI).replace(/\(.\)/, '') + '週' + (hol.length ? '<br><span style="color:var(--h-at-risk)">祝' + hol.length + '</span>' : '') + '</span>');
+    }
+    document.getElementById('thead').innerHTML = '<tr><th>担当者</th><th class="n">未完了</th><th class="n">重さ計</th>' +
+      '<th class="n">遅延</th><th class="n col-hide">今日</th><th class="n col-hide">PJ</th>' +
+      '<th><div class="small" style="margin-bottom:4px">' + m.head + '</div>' +
+      '<div class="wl-grid" style="--weeks:' + weeks + '">' + heads.join('') + '</div></th></tr>';
+    document.getElementById('legend-text').textContent = m.legend;
+    document.getElementById('metric-desc').innerHTML = m.desc;
+
+    function num(v, cls) {
+      return '<td class="n' + (v ? '' : ' zero') + '">' +
+        (v ? '<strong' + (cls ? ' style="color:var(' + cls + ')"' : '') + '>' + v + '</strong>' : '0') + '</td>';
+    }
+
+    document.getElementById('rows').innerHTML = rows.map(function (r) {
+      var cells = r.vals.map(function (v, i) {
+        var w = r.weeksInfo[i], note = U.weekNote(w);
+        return '<span class="wl-cell ' + r.levels[i] + (i === 0 ? ' now' : '') + '" title="' +
+          U.esc(H.formatDate(w.start) + '週：' + m.tip(v, w) + (note ? '（' + note + '）' : '')) + '">' + m.text(v) +
+          (w.leaveDays ? '<sup style="font-size:9px;margin-left:1px">休</sup>' : '') + '</span>';
+      }).join('');
+      var html = '<tr class="wl-row" data-uid="' + r.user.userId + '" style="cursor:pointer">' +
+        '<td><a class="row-link" style="font-weight:700" href="member.html?user=' + r.user.userId + '">' + U.esc(r.user.name) + '</a> ' +
+          (r.flag ? '<span class="wl-flag ' + r.flag[0] + '">' + r.flag[1] + '</span>' : '') +
+          '<div class="small muted">' + (r.user.role === 'admin' ? '管理者' : '担当者') + ' ・ 稼働 ' + r.capWeek + '人日/週' + (r.user.capacityNote ? '（' + U.esc(r.user.capacityNote) + '）' : '') +
+          (r.estimated ? ' ・ 重さ推定のまま ' + r.estimated + '件' : '') + '</div></td>' +
+        num(r.open) +
+        '<td class="n">' + (Math.round(r.totalEffort * 10) / 10) + '<span class="small muted">人日</span></td>' +
+        num(r.delayed, '--h-delayed') + '<td class="n col-hide' + (r.today ? '' : ' zero') + '">' + r.today + '</td>' +
+        '<td class="n col-hide">' + r.projects + '</td>' +
+        '<td><div class="wl-grid" style="--weeks:' + weeks + '">' + cells + '</div></td></tr>';
+
+      if (openRow === r.user.userId) {
+        var list = r.items.slice().sort(function (a, b) { return b.node.calc.effortDays - a.node.calc.effortDays; });
+        html += '<tr class="wl-detail"><td colspan="7"><ul>' + (list.length ? list.map(function (x) {
+          return '<li>' + U.healthBadge(x.node.calc.health) + ' ' + U.effortChip(x.node.calc) +
+            ' <a class="row-link" href="task-edit.html?id=' + x.node.itemId + '">' + U.esc(x.node.name) + '</a>' +
+            ' <span class="small muted">' + U.esc(x.project.name) + ' ・ ' + U.periodText(x.node.startDate, x.node.endDate) + '</span></li>';
+        }).join('') : '<li class="muted">未完了の作業単位はありません</li>') +
+        '</ul><div class="small faint" style="margin-top:6px">重さの大きい順。うす字＋「推定」は期間から推定した値です（編集画面で直せます）。</div>' +
+        '<a class="btn sm" style="margin-top:8px" href="member.html?user=' + r.user.userId + '">' + U.esc(r.user.name) + ' さんの状況を開く</a></td></tr>';
+      }
+      return html;
+    }).join('');
+
+    [].forEach.call(document.querySelectorAll('.wl-row'), function (tr) {
+      tr.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        openRow = openRow === tr.dataset.uid ? null : tr.dataset.uid;
+        render();
+      });
+    });
+
+    // ---- 未アサイン ----
+    document.getElementById('un-count').textContent = unassigned.length + ' 件';
+    document.getElementById('unassigned').innerHTML = unassigned.length ? unassigned.map(function (x) {
+      return '<tr><td><a class="row-link" href="task-edit.html?id=' + x.node.itemId + '">' + U.esc(x.node.name) + '</a>' +
+        '<div class="small muted">' + U.esc(x.project.name) + '</div></td>' +
+        '<td>' + U.effortChip(x.node.calc) + '</td>' +
+        '<td>' + U.dueText(x.node.calc, x.node.endDate) + '</td></tr>';
+    }).join('') : '<tr><td><div class="empty">未アサインのタスクはありません</div></td></tr>';
+  }
+
+  ['f-metric', 'f-sort', 'f-weeks'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+  render();
+})();
+</script>
+</body>
+</html>

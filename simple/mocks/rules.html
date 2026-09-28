@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>判定ルール｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .rule { font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 15px; background: var(--surface-2);
+          border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; line-height: 1.9; overflow-wrap: anywhere; }
+  .rgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: 16px; align-items: start; }
+  .rgrid .card { margin: 0; }
+  ol.order li { margin: 5px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>判定ルール</h1>
+          <div class="sub">対応中・遅延の決め方です。簡易版では設定できる値はなく、下の決まりで固定です</div></div>
+      </div>
+
+      <div class="rgrid">
+        <div class="card"><div class="card-head"><h2>1. 予定進捗率</h2></div><div class="card-body">
+          <div class="rule">予定進捗率 ＝ （今日 − 開始日 ＋ 1）÷（終了日 − 開始日 ＋ 1）<br>0%〜100% に収める</div>
+          <p class="small muted">「今日の時点で本来どこまで進んでいるはずか」です。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>2. 実績進捗率</h2></div><div class="card-body small">
+          <p class="muted">この％は<strong>判定には使いません</strong>。「どこまで進んだか」を人が見るための数字です。</p>
+          <p><strong>子タスクを持たないタスク</strong>：担当者が入れた％をそのまま使います。未入力は0%。完了にすると自動で100%。</p>
+          <p><strong>子タスクを持つタスク</strong>：子の％の<strong>単純平均</strong>。手入力できません。</p>
+          <p><strong>プロジェクト</strong>：配下のタスクの％の単純平均。</p>
+          <p class="muted">完全版にあった「期間日数や作業の重さで重みを付ける」計算は、簡易版では行いません。
+          大きいタスクと小さいタスクが同じ重みになる点は、割り切りです。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>3. 状態（上から順に判定）</h2></div><div class="card-body small">
+          <ol class="order">
+            <li>ステータスが完了 → <span id="b-done"></span></li>
+            <li><strong>終了日を過ぎて未完了</strong> → <span id="b-dl"></span></li>
+            <li>開始日・終了日が無い → <span id="b-np"></span></li>
+            <li>開始日より前 → <span id="b-ns"></span></li>
+            <li>それ以外 → <span id="b-ok"></span></li>
+          </ol>
+          <div class="callout small" style="margin-top:12px">
+            <strong>進捗率は判定に使いません。</strong>担当者が％を更新しなくても判定はぶれません。
+            その代わり、終了日が来るまでは遅れかけていても「対応中」のままです。
+            進み具合は進捗バーに重なる縦線（予定進捗）で見ます。
+          </div>
+          <p class="muted" style="margin-top:12px">
+            完全版にあった「実績 − 予定 が −10pt で注意、−25pt で遅延」というしきい値の判定は行いません。
+            そのため<strong>「注意」（黄色）はありません</strong>。
+          </p>
+          <p class="muted">親の状態は親自身の終了日で判定します。配下の遅れは「配下の遅延 n件」として別に出します。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>4. 遅れの出し方</h2></div><div class="card-body small">
+          <div class="rule">超過+N日 ＝ 今日 − 終了日（未完了のとき）<br>あと N 日 ＝ 終了日 − 今日</div>
+          <p class="muted">「N日遅れ」という書き方は使わず、<strong>超過+N日</strong> にそろえています。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>5. 色と記号</h2></div><div class="card-body" id="palette"></div></div>
+
+        <div class="card"><div class="card-head"><h2>6. 言葉の決まり</h2></div><div class="card-body small" id="terms"></div></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-12 ／ 要件書 §3 全体</li>
+          <li>簡易版では判定に設定値がありません。しきい値を持つのは完全版のほうです。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'rules', view: 'project' });
+
+  var s = D.settings;
+  function set(id, html) { var el = document.getElementById(id); if (el) el.innerHTML = html; }
+
+  set('b-done', U.healthBadge('done'));
+  set('b-dl', U.healthBadge('delayed'));
+  set('b-np', U.healthBadge('no_period'));
+  set('b-ns', U.healthBadge('not_started'));
+  set('b-ok', U.healthBadge('on_track'));
+
+  var DESC = {
+    on_track: '終了日をまだ過ぎていない', delayed: '終了日を過ぎて、まだ終わっていない',
+    done: '終わった', not_started: 'まだ始まっていない', no_period: '開始日・終了日が入っていない'
+  };
+  set('palette', ['on_track', 'delayed', 'done', 'not_started', 'no_period'].map(function (h) {
+    return '<div style="display:flex;align-items:center;gap:10px;padding:5px 0">' + U.healthBadge(h) +
+      '<span class="small muted">' + DESC[h] + '</span></div>';
+  }).join('') + '<p class="small muted">色だけに頼らず、記号（● ! ✓ ・ —）も必ず併記します。</p>');
+
+  var TERMS = [
+    ['タスク', '子タスクも含めた総称。「課題」「アイテム」とは呼びません'],
+    ['ステータス', '未着手／進行中／保留／完了の4つ固定'],
+    ['種別', '作業／バグ／要望の3つ固定'],
+    ['状態', '開始前／対応中／遅延／完了／期間未設定（「注意」は持ちません）'],
+    ['終了日', '項目名。「期限」は今日期限・今週などの区分名にだけ使います'],
+    ['担当者', '人の呼び方。「メンバー」とは呼びません'],
+    ['ガント', '期間を横棒で並べた図。「タイムライン」とは呼びません']
+  ];
+  set('terms', '<dl style="display:grid;grid-template-columns:96px 1fr;gap:6px 12px;margin:0">' +
+    TERMS.map(function (t) {
+      return '<dt class="muted">' + t[0] + '</dt><dd style="margin:0">' + t[1] + '</dd>';
+    }).join('') + '</dl>');
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>担当者別ガント｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .g-act, .g-plan { cursor: grab; }
+  /* 担当メニューのぶんラベル列を広げる */
+  .gantt .g-row, .gantt .g-head { grid-template-columns: minmax(400px, 470px) 1fr; }
+  @media (max-width: 900px) {
+    .gantt { min-width: 820px; }
+    .gantt .g-row, .gantt .g-head { grid-template-columns: 330px 1fr; }
+  }
+  .gantt .g-row.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .gantt .g-plan.dragging { opacity: .4; }
+  .g-reassign { font-size: 11px; padding: 0 4px; height: 24px; max-width: 104px; }
+  .toast { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; margin: 0 0 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    border-radius: 10px; font-size: 13px; }
+  .toast .warn { color: var(--h-delayed); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="page-head">
+        <div>
+          <h1>担当者別ガント</h1>
+          <div class="sub">担当者単位 ─ 1人ずつ、関わっている全プロジェクトの担当タスクを1本の時間軸に並べます</div>
+        </div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <a href="workload.html">負荷の一覧</a>
+        <a href="people-timeline.html" class="active">ガント</a>
+      </div>
+
+      <div id="toast"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>担当者 ＞ プロジェクト ＞ タスク</h2>
+          <span class="chip" id="count-chip">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label for="f-user">担当者</label>
+            <select class="inline" id="f-user"></select>
+            <label class="check-line small"><input type="checkbox" id="f-group" checked> プロジェクトでまとめる</label>
+            <label class="check-line small"><input type="checkbox" id="f-done"> 完了も表示</label>
+            <button class="btn sm" id="btn-toggle">すべて折りたたむ</button>
+          </div>
+        </div>
+        <div class="card-body tight">
+          <div id="gantt"></div>
+        </div>
+        <div class="card-head small muted" style="border-bottom:none;border-top:1px solid var(--border);gap:12px;flex-wrap:wrap">
+          <span>担当者の行の色帯＝週ごとの負荷率（緑 70%未満 ／ 黄 70〜100% ／ 赤 100%超）</span>
+          <span class="spacer"></span>
+          <span><strong>バーを別の担当者の行へドラッグで付け替え</strong>（各行の「担当」メニューからも可） ・ 担当者の行をクリックで開閉</span>
+        </div>
+        <div class="card-head" style="border-bottom:none;border-top:1px solid var(--border)">
+          <div id="gantt-legend-area"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-4-10（担当者別ガント）／F-0-3（担当者単位）／F-3-6（日付軸）</li>
+          <li>行の並びは「担当者 ＞ プロジェクト ＞ タスク」。出すのは作業単位（子タスク、または子を持たないタスク）で、親タスク名は各行の日付の横に出します。</li>
+          <li>担当者の行には、週ごとの負荷率を色帯で重ねています（⑬担当者一覧・個人ページと同じ計算）。赤い帯の下にどのタスクが重なっているかが、そのまま縦に読めます。</li>
+          <li>「プロジェクトでまとめる」を外すと、担当者の下にタスクを開始日順に直接並べます。</li>
+          <li>担当者の並びは「負荷の山が高い順」。未アサインのタスクは最後に別グループで出します。</li>
+          <li>付け替え（F-4-11）：タスクのバーを別の担当者の行（見出し・プロジェクト行・タスク行のどれでも）へドラッグすると、その人の担当に変わります。帯の負荷率はその場で再計算され、付け替え先が稼働超過になる場合は画面下のメッセージで警告します。「元に戻す」で1つずつ戻せます。</li>
+          <li>ドラッグできない環境（タッチ端末など）向けに、各タスク行の「担当」メニューからも同じ付け替えができます。</li>
+          <li>実装では、付け替えはタスクの担当者変更として更新履歴に残し、新しい担当者と外れた担当者に画面内のお知らせ（ヘッダーのベル）を出します。メール・チャットへの送信はスコープ外です。モックでは画面上だけで変わります（再読込で元に戻ります）。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script src="assets/gantt.js"></script>
+<script src="assets/load.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'workload', view: 'people' });
+
+  var WEEKS = 8;
+  var UNASSIGNED = '__none__';
+  var open = {};          // userId -> 開いているか
+  var reassigned = {};    // itemId -> 付け替え後の userId（モック上の一時変更）
+  var history = [];       // 元に戻す用 [{ itemId, from, to }]
+  var dragItem = null;
+  function whoOf(x) {
+    return Object.prototype.hasOwnProperty.call(reassigned, x.node.itemId) ? reassigned[x.node.itemId] : x.node.assigneeUserId;
+  }
+  var trees = U.allProjectTrees().filter(function (t) { return !t.archived; });
+
+  // ---- 作業単位（子タスク、または子を持たないタスク）を全プロジェクトから集める ----
+  var all = [];
+  trees.forEach(function (tree) {
+    H.flatten(tree).forEach(function (n) {
+      if (n.children && n.children.length) return;
+      var parent = n.level === 2
+        ? tree.children.filter(function (t) { return t.itemId === n.parentItemId; })[0] : null;
+      all.push({ node: n, project: tree, parent: parent });
+    });
+  });
+
+  // ---- 週ごとの負荷率（⑬・個人ページと同じ計算） ----
+  function mondayOf(iso) {
+    var dow = new Date(iso + 'T00:00:00').getDay();
+    return H.addDays(iso, -((dow + 6) % 7));
+  }
+  var week0 = mondayOf(D.today);
+  function span(n) {
+    if (!n.startDate || !n.endDate) return null;
+    return { start: n.startDate, end: n.endDate < D.today ? D.today : n.endDate };
+  }
+  function overlapDays(sp, ws, we) {
+    if (!sp) return 0;
+    var s = sp.start > ws ? sp.start : ws;
+    var e = sp.end < we ? sp.end : we;
+    return s > e ? 0 : H.diffDays(s, e) + 1;
+  }
+  // 週ごとの負荷率（load.js：祝日・休み・人ごとの稼働を反映。⑬・個人ページと同じ計算）
+  function bandsOf(units, uid) {
+    var open = units.filter(function (x) { return x.node.statusCategory !== H.CATEGORY.DONE; });
+    return U.weekLoads(open, uid, WEEKS, week0);
+  }
+
+  // ---- 担当者の選択肢 ----
+  var fUser = document.getElementById('f-user');
+  fUser.innerHTML = '<option value="">全員</option>' + D.users.filter(function (u) { return u.active; }).map(function (u) {
+    return '<option value="' + u.userId + '">' + U.esc(u.name) + '</option>';
+  }).join('') + '<option value="' + UNASSIGNED + '">未アサインのみ</option>';
+
+  function userOptions(current) {
+    return D.users.filter(function (u) { return u.active; }).map(function (u) {
+      return '<option value="' + u.userId + '"' + (u.userId === current ? ' selected' : '') + '>' + U.esc(u.name) + '</option>';
+    }).join('') + '<option value=""' + (!current ? ' selected' : '') + '>未アサイン</option>';
+  }
+
+  function taskRow(x, groupId) {
+    var n = x.node;
+    return {
+      attrs: ' data-uid="' + groupId + '"',
+      barAttrs: ' draggable="true" data-item="' + n.itemId + '"',
+      nameExtraHtml: '<select class="inline g-reassign" data-item="' + n.itemId + '" aria-label="' + U.esc(n.name) + ' の担当を変更">' +
+        userOptions(whoOf(x)) + '</select>',
+      name: n.name, level: 3, startDate: n.startDate, endDate: n.endDate, calc: n.calc,
+      baselineStartDate: n.baselineStartDate, baselineEndDate: n.baselineEndDate,
+      href: 'task-edit.html?id=' + n.itemId,
+      tag: (x.parent ? x.parent.name + ' ・ ' : '') + (n.calc.sizeKey ? n.calc.sizeKey + ' ' + U.days(n.calc.effortDays) : '')
+    };
+  }
+
+  function render() {
+    var who = fUser.value;
+    var byProject = document.getElementById('f-group').checked;
+    var showDone = document.getElementById('f-done').checked;
+
+    var units = all.filter(function (x) { return showDone || x.node.statusCategory !== H.CATEGORY.DONE; });
+
+    // 担当者ごとにまとめる（未アサインは最後）
+    var groups = D.users.filter(function (u) { return u.active; }).map(function (u) {
+      var mine = units.filter(function (x) { return whoOf(x) === u.userId; });
+      return { id: u.userId, user: u, units: mine, bands: bandsOf(mine, u.userId) };
+    });
+    groups.forEach(function (g) { g.peak = Math.max.apply(null, g.bands.map(function (b) { return b.rate; }).concat([0])); });
+    groups.sort(function (a, b) { return b.peak - a.peak; });
+    var none = units.filter(function (x) { return !whoOf(x); });
+    if (none.length) groups.push({ id: UNASSIGNED, user: null, units: none, bands: [], peak: 0 });
+
+    if (who) groups = groups.filter(function (g) { return g.id === who; });
+    groups = groups.filter(function (g) { return g.units.length; });
+
+    var rows = [];
+    groups.forEach(function (g) {
+      if (open[g.id] === undefined) open[g.id] = true;
+      var isOpen = open[g.id];
+      var delayed = g.units.filter(function (x) { return x.node.calc.health === 'delayed'; }).length;
+      var effort = g.units.filter(function (x) { return x.node.statusCategory !== H.CATEGORY.DONE; })
+        .reduce(function (s, x) { return s + x.node.calc.effortDays; }, 0);
+      var pjIds = {};
+      g.units.forEach(function (x) { pjIds[x.project.projectId] = true; });
+      var pjCount = Object.keys(pjIds).length;
+
+      rows.push({
+        kind: 'group', open: isOpen,
+        name: g.user ? g.user.name : '未アサイン',
+        href: g.user ? 'member.html?user=' + g.user.userId : null,
+        attrs: ' data-group="' + g.id + '" data-uid="' + g.id + '"',
+        badgeHtml:
+          (g.peak > 1 ? ' <span class="badge delayed">稼働超過</span>' : '') +
+          (delayed ? ' <span class="badge delayed">遅延 ' + delayed + '</span>' : ''),
+        metaHtml: g.units.length + '件 ・ ' + pjCount + 'プロジェクト ・ 残り ' + U.days(effort) + (g.user ? ' ・ 稼働 ' + U.capacityPerWeek(g.user.userId) + '人日/週' : ''),
+        bands: g.bands
+      });
+      if (!isOpen) return;
+
+      var list = g.units.slice().sort(function (a, b) {
+        return (a.node.startDate || '9') < (b.node.startDate || '9') ? -1 : 1;
+      });
+
+      if (byProject) {
+        var order = [], map = {};
+        list.forEach(function (x) {
+          var id = x.project.projectId;
+          if (!map[id]) { map[id] = []; order.push(x.project); }
+          map[id].push(x);
+        });
+        order.forEach(function (p) {
+          var items = map[p.projectId];
+          var s = null, e = null;
+          items.forEach(function (x) {
+            if (x.node.startDate && (!s || x.node.startDate < s)) s = x.node.startDate;
+            if (x.node.endDate && (!e || x.node.endDate > e)) e = x.node.endDate;
+          });
+          rows.push({
+            kind: 'sub', name: p.name, href: 'project-detail.html?id=' + p.projectId, attrs: ' data-uid="' + g.id + '"',
+            startDate: s, endDate: e,
+            badgeHtml: ' ' + U.healthBadge(p.calc.health),
+            metaHtml: items.length + '件'
+          });
+          items.forEach(function (x) { rows.push(taskRow(x, g.id)); });
+        });
+      } else {
+        list.forEach(function (x) {
+          var r = taskRow(x, g.id);
+          r.tag = x.project.name + (r.tag ? ' ・ ' + r.tag : '');
+          rows.push(r);
+        });
+      }
+    });
+
+    var shownTasks = rows.filter(function (r) { return r.level === 3; }).length;
+    document.getElementById('count-chip').textContent = groups.length + '人 ・ ' + shownTasks + '件表示';
+    document.getElementById('gantt').innerHTML = U.ganttHtml(rows, {
+      today: D.today, labelHead: '担当者 ／ プロジェクト ／ タスク（期間）',
+      emptyText: '表示する担当がありません'
+    });
+
+    document.getElementById('gantt-legend-area').innerHTML = U.ganttLegend();
+    wireDnD();
+
+    document.querySelectorAll('.g-group').forEach(function (el) {
+      el.addEventListener('click', function (ev) {
+        if (ev.target.closest('a')) return;           // 名前のリンクは個人ページへ
+        var id = el.getAttribute('data-group');
+        open[id] = !open[id];
+        render();
+      });
+    });
+    var anyOpen = groups.some(function (g) { return open[g.id]; });
+    document.getElementById('btn-toggle').textContent = anyOpen ? 'すべて折りたたむ' : 'すべて展開する';
+  }
+
+  // ---- 付け替え ----
+  function nameOf(uid) {
+    if (!uid || uid === UNASSIGNED) return '未アサイン';
+    return D.userName(uid);
+  }
+  function thisWeekRate(uid) {
+    var mine = all.filter(function (x) { return whoOf(x) === uid && x.node.statusCategory !== H.CATEGORY.DONE; });
+    return bandsOf(mine, uid)[0].rate;
+  }
+  function peakRate(uid) {
+    var mine = all.filter(function (x) { return whoOf(x) === uid && x.node.statusCategory !== H.CATEGORY.DONE; });
+    return Math.max.apply(null, bandsOf(mine, uid).map(function (b) { return b.rate; }).concat([0]));
+  }
+
+  function reassign(itemId, toUid) {
+    var x = all.filter(function (y) { return y.node.itemId === itemId; })[0];
+    if (!x) return;
+    var from = whoOf(x) || '';
+    var to = toUid === UNASSIGNED ? '' : toUid;
+    if (from === to) return;
+    var beforePeak = to ? peakRate(to) : 0;
+    history.push({ itemId: itemId, from: from, to: to });
+    reassigned[itemId] = to;
+    if (to) open[to] = true;
+    // 画面内のお知らせ（付け替えた相手と、外れた人に）
+    var actor = D.userById(U.currentUserId());
+    if (to) D.notify(to, 'reassign', '「' + x.node.name + '」の担当があなたになりました（' + (actor ? actor.name : '') + '）', 'task-edit.html?id=' + itemId);
+    if (from) D.notify(from, 'reassign', '「' + x.node.name + '」の担当が ' + nameOf(to) + ' さんに変わりました', 'task-edit.html?id=' + itemId);
+    U.refreshBell();
+    showToast(x, from, to, beforePeak);
+    render();
+  }
+
+  function showToast(x, from, to, beforePeak) {
+    var el = document.getElementById('toast');
+    var msg = '「' + U.esc(x.node.name) + '」の担当を <strong>' + U.esc(nameOf(from)) + '</strong> → <strong>' + U.esc(nameOf(to)) + '</strong> に付け替えました。';
+    if (to) {
+      var after = peakRate(to);
+      msg += ' ' + U.esc(nameOf(to)) + ' さんの負荷の山：' + Math.round(beforePeak * 100) + '% → ' + Math.round(after * 100) + '%';
+      if (after > 1 && beforePeak <= 1) msg += ' <span class="warn">稼働超過になります</span>';
+      else if (after > 1) msg += ' <span class="warn">稼働超過が続きます</span>';
+    }
+    el.innerHTML = '<div class="toast" role="status"><span>' + msg + '</span><span class="spacer"></span>' +
+      '<button class="btn sm" id="btn-undo">元に戻す</button></div>';
+    document.getElementById('btn-undo').addEventListener('click', function () {
+      var h = history.pop();
+      if (!h) return;
+      if (h.from === (x.node.assigneeUserId || '')) delete reassigned[h.itemId];
+      else reassigned[h.itemId] = h.from;
+      el.innerHTML = '';
+      render();
+    });
+  }
+
+  function wireDnD() {
+    var gantt = document.getElementById('gantt');
+    gantt.querySelectorAll('[data-item][draggable]').forEach(function (bar) {
+      bar.addEventListener('dragstart', function (ev) {
+        dragItem = bar.getAttribute('data-item');
+        ev.dataTransfer.effectAllowed = 'move';
+        try { ev.dataTransfer.setData('text/plain', dragItem); } catch (e) { /* 古いブラウザ */ }
+        bar.classList.add('dragging');
+      });
+      bar.addEventListener('dragend', function () {
+        dragItem = null;
+        bar.classList.remove('dragging');
+        gantt.querySelectorAll('.drop-target').forEach(function (r) { r.classList.remove('drop-target'); });
+      });
+    });
+
+    gantt.querySelectorAll('.g-row[data-uid]').forEach(function (row) {
+      row.addEventListener('dragover', function (ev) {
+        if (!dragItem) return;
+        ev.preventDefault();
+        var uid = row.getAttribute('data-uid');
+        gantt.querySelectorAll('.drop-target').forEach(function (r) { if (r.getAttribute('data-uid') !== uid) r.classList.remove('drop-target'); });
+        // 付け替え先の担当者の見出し行を光らせる
+        var head = gantt.querySelector('.g-group[data-uid="' + uid + '"]');
+        if (head) head.classList.add('drop-target');
+      });
+      row.addEventListener('drop', function (ev) {
+        ev.preventDefault();
+        var id = dragItem || ev.dataTransfer.getData('text/plain');
+        if (id) reassign(id, row.getAttribute('data-uid'));
+      });
+    });
+
+    gantt.querySelectorAll('select.g-reassign').forEach(function (sel) {
+      sel.addEventListener('click', function (ev) { ev.stopPropagation(); });
+      sel.addEventListener('change', function () { reassign(sel.getAttribute('data-item'), sel.value || UNASSIGNED); });
+    });
+  }
+
+  document.getElementById('btn-toggle').addEventListener('click', function () {
+    var ids = Object.keys(open);
+    var anyOpen = ids.some(function (k) { return open[k]; });
+    ids.forEach(function (k) { open[k] = !anyOpen; });
+    render();
+  });
+  ['f-user', 'f-group', 'f-done'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+
+  // ?user= が付いていればその人だけ
+  var q = U.qs('user', '');
+  if (q) fUser.value = q;
+  render();
+})();
+</script>
+</body>
+</html>

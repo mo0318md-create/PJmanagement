@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ボード｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .kb { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+  .kb-col { flex: 1 0 220px; min-width: 220px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px; }
+  .kb-col.over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .kb-head { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .kb-head .cat { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-muted); }
+  .kb-card { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 11px; margin-bottom: 8px; cursor: grab; color: var(--text); }
+  .kb-card:hover { text-decoration: none; border-color: var(--accent); }
+  .kb-card.delayed { box-shadow: inset 3px 0 0 var(--h-delayed); }
+  .kb-card .t { font-weight: 700; font-size: 13px; margin: 4px 0 6px; }
+  .kb-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
+  .lbl { font-size: 10px; border-radius: 4px; padding: 1px 6px; color: #34302b; }
+  .sub-bar { height: 5px; background: var(--bar-track); border-radius: 999px; overflow: hidden; margin: 6px 0; }
+  .sub-bar > span { display: block; height: 100%; background: var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb">—</div>
+      <div class="page-head">
+        <div><h1 id="title">ボード</h1><div class="sub">カードをドラッグして別の列へ移すと、ステータスが変わります</div></div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+      <div class="kb" id="board"></div>
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>キャンバスの ④ に対応。列＝このプロジェクトのステータス列（プロジェクト設定で変更）、カード＝タスク（第2階層）。</li>
+          <li>移すと健全性と進捗をその場で再計算します。完了の列へ移すと実績終了日が、進行中の列へ初めて移すと実績開始日が入ります（F-2-17）。モックでは画面上だけで変わります。</li>
+          <li>キーボード操作向けに、カードを開いた編集画面からもステータスを変えられます。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script src="assets/project-tabs.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'dashboard', view: 'project' });
+  var project = D.projectById(U.qs('id', 'p1')) || D.projects[0];
+  U.projectTabs(project, 'board');
+  var dragId = null;
+
+  function render() {
+    var tree = U.projectTree(project);
+    var cols = H.statusesOf(project);
+    document.getElementById('board').innerHTML = cols.map(function (c) {
+      var cards = tree.children.filter(function (t) { return t.statusKey === c.key; });
+      return '<div class="kb-col" data-col="' + c.key + '">' +
+        '<div class="kb-head">' + U.esc(c.label) + ' <span class="chip">' + cards.length + '</span><span class="cat">' + H.CATEGORY_LABEL[c.category] + '</span></div>' +
+        cards.map(function (t) {
+          var subs = t.children || [];
+          var done = subs.filter(function (s) { return s.statusCategory === 'done'; }).length;
+          var labels = (t.labelIds || []).map(function (id) { var l = D.labelById(id); return l ? '<span class="lbl" style="background:' + l.color + '">' + U.esc(l.name) + '</span>' : ''; }).join('');
+          var ms = t.milestoneId ? D.milestones.filter(function (m) { return m.milestoneId === t.milestoneId; })[0] : null;
+          return '<a class="kb-card ' + t.calc.health + '" draggable="true" data-id="' + t.itemId + '" href="task-edit.html?id=' + t.itemId + '">' +
+            '<div class="kb-meta">' + U.healthBadge(t.calc.health) + (ms ? ' <span>◆ ' + U.esc(ms.name) + '</span>' : '') + '</div>' +
+            '<div class="t">' + U.esc(t.name) + '</div>' +
+            (labels ? '<div class="kb-meta">' + labels + '</div>' : '') +
+            (subs.length ? '<div class="sub-bar"><span style="width:' + Math.round(done / subs.length * 100) + '%"></span></div><div class="kb-meta">子タスク ' + done + '/' + subs.length + '</div>' : '') +
+            '<div class="kb-meta" style="margin-top:6px"><span>' + (t.assigneeUserId ? U.esc(D.userName(t.assigneeUserId)) : '未アサイン') + '</span><span class="spacer"></span>' + U.dueText(t.calc, t.endDate) + '</div>' +
+            '</a>';
+        }).join('') + '</div>';
+    }).join('');
+
+    document.querySelectorAll('.kb-card').forEach(function (el) {
+      el.addEventListener('dragstart', function () { dragId = el.getAttribute('data-id'); });
+      el.addEventListener('dragend', function () { dragId = null; });
+    });
+    document.querySelectorAll('.kb-col').forEach(function (col) {
+      col.addEventListener('dragover', function (e) { e.preventDefault(); col.classList.add('over'); });
+      col.addEventListener('dragleave', function () { col.classList.remove('over'); });
+      col.addEventListener('drop', function (e) {
+        e.preventDefault(); col.classList.remove('over');
+        if (!dragId) return;
+        var it = D.itemById(dragId), key = col.getAttribute('data-col');
+        var cat = H.statusCategory(project, key);
+        it.statusKey = key;
+        if (cat !== 'not_started' && !it.actualStartDate) it.actualStartDate = D.today;
+        it.actualEndDate = cat === 'done' ? (it.actualEndDate || D.today) : null;
+        render();
+      });
+    });
+  }
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>担当者一覧｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>担当者一覧</h1>
+          <div class="sub">担当者単位の入口です。誰にどれだけ溜まっているかを件数で見ます。名前をクリックすると個人ページへ移ります</div></div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <a href="people.html" class="active" aria-current="page">一覧</a>
+        <a href="people-gantt.html">ガント</a>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="card">
+        <div class="card-head"><h2>担当者</h2>
+          <span class="spacer"></span>
+          <select class="inline" id="f-sort" aria-label="並び順">
+            <option value="delayed">遅延が多い順</option>
+            <option value="open">未完了が多い順</option>
+            <option value="name">名前順</option>
+          </select>
+        </div>
+        <div class="card-body tight" id="list"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-0-3（軸の入口）／F-4-13（担当者一覧）</li>
+          <li>数える単位は<strong>子タスク、または子を持たないタスク</strong>です。子を持つタスクは中身と二重になるので数えません。</li>
+          <li>完全版にあった「週ごとの負荷率・稼働・作業の重さ」は簡易版では持ちません。件数だけで見ます。</li>
+          <li>未アサインのタスクも最後の行に出します。放置されないようにするためです。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'people', view: 'people' });
+
+  // 数える単位＝子タスク、または子を持たないタスク
+  var units = [];
+  D.allTrees().forEach(function (t) {
+    H.flatten(t).forEach(function (r) {
+      if (r.calc.hasChildren) return;
+      units.push({ node: r.node, calc: r.calc, project: t.node });
+    });
+  });
+
+  function statsOf(uid) {
+    var mine = units.filter(function (u) {
+      return uid === null ? !u.node.assigneeUserId : u.node.assigneeUserId === uid;
+    });
+    var open = mine.filter(function (u) { return u.node.status !== 'done'; });
+    var pids = {};
+    open.forEach(function (u) { pids[u.project.projectId] = true; });
+    return {
+      total: mine.length,
+      open: open.length,
+      done: mine.length - open.length,
+      delayed: open.filter(function (u) { return u.calc.health === 'delayed'; }).length,
+      today: open.filter(function (u) { return U.dueGroup(u.node, u.calc) === 'today'; }).length,
+      week: open.filter(function (u) { return U.dueGroup(u.node, u.calc) === 'week'; }).length,
+      projects: Object.keys(pids).length
+    };
+  }
+
+  var rows = D.users.map(function (u) { return { user: u, s: statsOf(u.userId) }; });
+  var none = statsOf(null);
+
+  // ---- サマリ ----
+  var totalDelayed = 0, totalOpen = 0;
+  rows.forEach(function (r) { totalDelayed += r.s.delayed; totalOpen += r.s.open; });
+  totalDelayed += none.delayed; totalOpen += none.open;
+  var heavy = rows.filter(function (r) { return r.s.delayed >= 2; });
+  document.getElementById('stats').innerHTML = [
+    ['delayed', '遅延中', totalDelayed, '件', heavy.length ? heavy.map(function (r) { return r.user.name; }).join('・') + ' に集中' : '特定の人への集中なし'],
+    ['at_risk', '未完了', totalOpen, '件', D.users.length + '人で分担'],
+    ['not_started', '未アサイン', none.open, '件', none.open ? '担当を決める必要があります' : 'すべて担当が決まっています'],
+    ['on_track', '完了', units.filter(function (u) { return u.node.status === 'done'; }).length, '件', '全プロジェクトの合計']
+  ].map(function (r) {
+    return '<div class="stat ' + r[0] + '"><div class="label">' + r[1] + '</div>' +
+      '<div class="value">' + r[2] + '<span class="unit">' + r[3] + '</span></div>' +
+      '<div class="small muted" style="margin-top:4px">' + U.esc(r[4]) + '</div></div>';
+  }).join('');
+
+  // ---- 一覧 ----
+  document.getElementById('f-sort').addEventListener('change', render);
+
+  var COLS = '<colgroup><col><col style="width:106px"><col style="width:96px">' +
+    '<col class="col-hide" style="width:112px"><col class="col-hide" style="width:96px">' +
+    '<col class="col-hide" style="width:96px"><col style="width:112px">' +
+    '<col style="width:104px"></colgroup>';
+
+  function render() {
+    var sort = document.getElementById('f-sort').value;
+    var list = rows.slice();
+    list.sort(function (a, b) {
+      if (sort === 'name') return a.user.name.localeCompare(b.user.name, 'ja');
+      if (sort === 'open') return b.s.open - a.s.open;
+      return b.s.delayed - a.s.delayed || b.s.open - a.s.open;
+    });
+
+    document.getElementById('list').innerHTML =
+      '<table class="tbl fixed">' + COLS + '<thead><tr><th>担当者</th><th class="c">未完了</th><th class="c">遅延</th>' +
+      '<th class="c col-hide">今日期限</th><th class="c col-hide">今週</th><th class="c col-hide">完了</th>' +
+      '<th class="c">関わるPJ</th><th></th></tr></thead><tbody>' +
+      list.map(function (r) {
+        return line(U.avatar(r.user.userId) + ' <a class="row-link" href="member.html?user=' + r.user.userId + '"><strong>' +
+          U.esc(r.user.name) + '</strong></a>' + (r.user.role === 'admin' ? ' <span class="tag">管理者</span>' : ''),
+          r.s, 'member.html?user=' + r.user.userId);
+      }).join('') +
+      (none.total ? line('<span class="avatar none">?</span> <strong>未アサイン</strong>', none,
+        'search.html') : '') +
+      '</tbody></table>';
+  }
+
+  function line(nameHtml, s, href) {
+    return '<tr>' +
+      '<td>' + nameHtml + '</td>' +
+      '<td class="c num">' + s.open + '</td>' +
+      '<td class="c num">' + (s.delayed ? '<span class="delay-note">' + s.delayed + '</span>' : '<span class="faint">0</span>') + '</td>' +
+      '<td class="c num col-hide">' + (s.today || '<span class="faint">0</span>') + '</td>' +
+      '<td class="c num col-hide">' + (s.week || '<span class="faint">0</span>') + '</td>' +
+      '<td class="c num col-hide faint">' + s.done + '</td>' +
+      '<td class="c num">' + s.projects + '</td>' +
+      '<td class="small"><a class="row-link" href="' + href + '">見る →</a></td>' +
+    '</tr>';
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

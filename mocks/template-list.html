@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>テンプレート一覧｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="page-head">
+        <div>
+          <h1>プロジェクトテンプレート</h1>
+          <div class="sub">よくあるプロジェクトの型を登録しておくと、作成時にタスク・子タスクが自動登録されます</div>
+        </div>
+        <span class="spacer"></span>
+        <a class="btn primary" href="template-edit.html?id=new">＋ テンプレートを作成</a>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>登録済みテンプレート</h2>
+          <span class="chip" id="cnt">—</span>
+        </div>
+        <div class="card-body tight">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>テンプレート名</th>
+                <th>分類</th>
+                <th class="c">タスク</th>
+                <th class="c">子タスク</th>
+                <th class="c col-hide">標準日数</th>
+                <th class="col-hide">固有の設定項目</th>
+                <th class="c col-hide">利用中</th>
+                <th class="r">操作</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-1-7（テンプレートCRUD）／F-1-8（複製）</li>
+          <li>「利用中」は、そのテンプレートから作成されたプロジェクトの件数です。テンプレートを編集しても既存プロジェクトには遡及しません（F-1-9）。</li>
+          <li>未確定: 削除の扱い。利用中のテンプレートは削除ではなく「無効化」（新規作成の選択肢から外す）だけにする想定です。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var D = window.MockData, U = window.UI;
+  UI.renderShell({ active: 'templates', view: 'project' });
+
+  document.getElementById('cnt').textContent = D.templates.length + ' 件';
+
+  document.getElementById('rows').innerHTML = D.templates.map(function (t) {
+    var tasks = t.items.filter(function (i) { return i.level === 1; }).length;
+    var subs = t.items.length - tasks;
+    var used = D.projects.filter(function (p) { return p.templateId === t.templateId; }).length;
+    var fields = t.fields.map(function (f) {
+      return '<span class="tag">' + U.esc(f.label) + (f.required ? ' *' : '') + '</span>';
+    }).join(' ');
+
+    return '<tr>' +
+      '<td><a class="row-link" href="template-edit.html?id=' + t.templateId + '">' + U.esc(t.name) + '</a>' +
+        '<div class="small muted">' + U.esc(t.description) + '</div></td>' +
+      '<td><span class="tag">' + U.esc(t.category) + '</span></td>' +
+      '<td class="c num">' + tasks + '</td>' +
+      '<td class="c num">' + subs + '</td>' +
+      '<td class="c num col-hide">' + t.defaultDurationDays + '日</td>' +
+      '<td class="col-hide small" style="line-height:2">' + (fields || '<span class="faint">なし</span>') + '</td>' +
+      '<td class="c num col-hide">' + used + '</td>' +
+      '<td class="r nowrap">' +
+        '<a class="btn sm" href="template-edit.html?id=' + t.templateId + '">編集</a> ' +
+        '<button class="btn sm ghost" data-copy="' + t.templateId + '">複製</button>' +
+      '</td>' +
+      '</tr>';
+  }).join('');
+
+  document.querySelectorAll('[data-copy]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = D.templateById(this.getAttribute('data-copy'));
+      alert('［モック］「' + t.name + '」を複製して編集画面を開きます。');
+      location.href = 'template-edit.html?id=' + t.templateId;
+    });
+  });
+})();
+</script>
+</body>
+</html>

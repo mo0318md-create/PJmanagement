@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>担当者別ガント｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>担当者別ガント</h1>
+          <div class="sub">担当者ごとに、関わっている全プロジェクトの担当タスクを1本の時間軸に並べます</div></div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <a href="people.html">一覧</a>
+        <a href="people-gantt.html" class="active" aria-current="page">ガント</a>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>担当者 ＞ プロジェクト ＞ タスク</h2><span class="tag" id="count">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label class="small muted" for="f-scale">目盛り</label>
+            <select class="inline" id="f-scale" aria-label="日付の目盛り"><option value="week">週</option><option value="month">月</option></select>
+            <select class="inline" id="f-user" aria-label="担当者で絞り込み"></select>
+            <label class="small muted"><input type="checkbox" id="f-group" checked> プロジェクトでまとめる</label>
+            <label class="small muted"><input type="checkbox" id="f-done"> 完了も表示</label>
+            <button class="btn sm" id="btn-toggle">すべて閉じる</button>
+          </div>
+        </div>
+        <div class="card-body tight" id="gantt"></div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none">
+          <div id="legend"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-4-10（担当者別ガント）</li>
+          <li>担当者の行は、その人の担当タスクの期間をまとめた帯です。行をクリックすると開閉します。</li>
+          <li>「プロジェクトでまとめる」を外すと、担当者の下にタスクを開始日順に直接並べます。誰がいつ何をするかを時系列で追うときはこちらです。</li>
+          <li>数える単位は<strong>子タスク、または子を持たないタスク</strong>で、担当者一覧（⑪）・個人ページ（⑬）と同じです。</li>
+          <li>完全版にあった「週ごとの負荷率の色帯」と「バーをドラッグして担当を付け替える」は、負荷の機能を削ったので簡易版では持ちません。担当の変更はタスクの編集（⑦）で行います。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script src="assets/gantt.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'people', view: 'people' });
+  document.getElementById('legend').innerHTML = U.ganttLegend();
+
+  var open = {};
+  D.users.forEach(function (u) { open[u.userId] = true; });
+  open['@none'] = true;
+
+  document.getElementById('f-user').innerHTML =
+    ['<option value="">担当者：全員</option>']
+      .concat(D.users.map(function (u) { return '<option value="' + u.userId + '">' + U.esc(u.name) + '</option>'; })).join('');
+  ['f-scale', 'f-user', 'f-group', 'f-done'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+  document.getElementById('btn-toggle').addEventListener('click', function () {
+    var keys = Object.keys(open);
+    var anyOpen = keys.some(function (k) { return open[k]; });
+    keys.forEach(function (k) { open[k] = !anyOpen; });
+    this.textContent = anyOpen ? 'すべて開く' : 'すべて閉じる';
+    render();
+  });
+
+  // 数える単位＝子タスク、または子を持たないタスク
+  function units() {
+    var out = [];
+    D.allTrees().forEach(function (t) {
+      H.flatten(t).forEach(function (r) {
+        if (r.calc.hasChildren) return;
+        out.push({ node: r.node, calc: r.calc, project: t.node });
+      });
+    });
+    return out;
+  }
+
+  /** 期間の最小・最大をまとめる */
+  function rangeOf(list) {
+    var s = null, e = null;
+    list.forEach(function (x) {
+      if (!x.node.startDate || !x.node.endDate) return;
+      if (!s || x.node.startDate < s) s = x.node.startDate;
+      if (!e || x.node.endDate > e) e = x.node.endDate;
+    });
+    return { start: s, end: e };
+  }
+
+  /** まとめ行の状態＝配下でいちばん悪いもの */
+  var RANK = { delayed: 0, no_period: 1, on_track: 2, not_started: 3, done: 4 };
+  function worst(list) {
+    var best = 'done';
+    list.forEach(function (x) { if (RANK[x.calc.health] < RANK[best]) best = x.calc.health; });
+    return list.length ? best : 'not_started';
+  }
+
+  function render() {
+    var fu = document.getElementById('f-user').value;
+    var byProject = document.getElementById('f-group').checked;
+    var showDone = document.getElementById('f-done').checked;
+
+    var all = units().filter(function (x) { return showDone || x.node.status !== 'done'; });
+    var rows = [];
+    var people = D.users.filter(function (u) { return !fu || u.userId === fu; })
+      .map(function (u) { return { key: u.userId, name: u.name, list: all.filter(function (x) { return x.node.assigneeUserId === u.userId; }) }; });
+    if (!fu) {
+      people.push({ key: '@none', name: '未アサイン', list: all.filter(function (x) { return !x.node.assigneeUserId; }) });
+    }
+    people = people.filter(function (p) { return p.list.length; });
+
+    people.forEach(function (p) {
+      var r = rangeOf(p.list);
+      var delayed = p.list.filter(function (x) { return x.calc.health === 'delayed'; }).length;
+      var pids = {};
+      p.list.forEach(function (x) { pids[x.project.projectId] = true; });
+
+      rows.push({
+        kind: 'group',
+        name: p.name,
+        open: !!open[p.key],
+        startDate: r.start, endDate: r.end,
+        calc: { health: worst(p.list) },
+        href: p.key === '@none' ? null : 'member.html?user=' + p.key,
+        attrs: ' data-toggle="' + p.key + '"',
+        badgeHtml: (delayed ? ' <span class="badge delayed"><span class="ico" aria-hidden="true">!</span>遅延 ' + delayed + '</span>' : ''),
+        metaHtml: p.list.length + '件 ／ ' + Object.keys(pids).length + 'プロジェクト' +
+          (r.start ? ' ・ ' + U.periodText(r.start, r.end) : '')
+      });
+
+      if (!open[p.key]) return;
+
+      if (byProject) {
+        var groups = {};
+        p.list.forEach(function (x) {
+          (groups[x.project.projectId] = groups[x.project.projectId] || { project: x.project, list: [] }).list.push(x);
+        });
+        Object.keys(groups).forEach(function (pid) {
+          var g = groups[pid], gr = rangeOf(g.list);
+          rows.push({
+            kind: 'sub',
+            name: g.project.key + ' ' + g.project.name,
+            startDate: gr.start, endDate: gr.end,
+            calc: { health: worst(g.list) },
+            href: 'project.html?id=' + pid,
+            metaHtml: g.list.length + '件'
+          });
+          g.list.sort(byStart).forEach(function (x) { rows.push(taskRow(x, false)); });
+        });
+      } else {
+        p.list.slice().sort(byStart).forEach(function (x) { rows.push(taskRow(x, true)); });
+      }
+    });
+
+    function byStart(a, b) {
+      return (a.node.startDate || '9999').localeCompare(b.node.startDate || '9999');
+    }
+    function taskRow(x, withProject) {
+      return {
+        name: x.node.name,
+        itemType: x.node.itemType,
+        itemKey: x.node.itemKey,
+        level: 1,
+        startDate: x.node.startDate,
+        endDate: x.node.endDate,
+        calc: x.calc,
+        href: 'task-edit.html?id=' + x.node.itemId,
+        tag: withProject ? x.project.key + ' ' + x.project.name : null
+      };
+    }
+
+    document.getElementById('count').textContent =
+      people.length + '人 ・ ' + people.reduce(function (n, p) { return n + p.list.length; }, 0) + '件';
+    document.getElementById('gantt').innerHTML = U.ganttHtml(rows, {
+      today: D.today,
+      scale: document.getElementById('f-scale').value,
+      labelHead: '担当者 ／ プロジェクト ／ タスク（期間）',
+      emptyText: '担当されているタスクがありません'
+    });
+
+    document.querySelectorAll('.g-row[data-toggle]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        var k = this.getAttribute('data-toggle');
+        open[k] = !open[k];
+        render();
+      });
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

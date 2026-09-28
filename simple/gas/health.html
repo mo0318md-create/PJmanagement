@@ -1,0 +1,142 @@
+<script>
+/**
+ * 進捗と状態の判定（ブラウザ側）
+ * 要件書 §3 に対応。サーバーの Health.gs と同じ計算をする。
+ *
+ * 【重要】計算を直すときは Health.gs も同じに直すこと。
+ */
+var H = (function () {
+  'use strict';
+
+  var STATUS = { NOT_STARTED: 'not_started', IN_PROGRESS: 'in_progress', ON_HOLD: 'on_hold', DONE: 'done' };
+  var STATUS_LABEL = { not_started: '未着手', in_progress: '進行中', on_hold: '保留', done: '完了' };
+  var STATUS_ORDER = ['not_started', 'in_progress', 'on_hold', 'done'];
+  var TYPE_LABEL = { work: '作業', bug: 'バグ', req: '要望' };
+  var HEALTH_LABEL = { done: '完了', delayed: '遅延', on_track: '対応中', not_started: '開始前', no_period: '期間未設定' };
+  var HEALTH_ICON = { done: '✓', delayed: '!', on_track: '●', not_started: '・', no_period: '—' };
+
+  function parse(iso) {
+    var p = String(iso).split('-');
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+  function toISO(d) {
+    var m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+  function diffDays(a, b) { return Math.round((parse(b) - parse(a)) / 86400000); }
+  function addDays(iso, n) {
+    var d = parse(iso);
+    return toISO(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n));
+  }
+  function durationDays(s, e) { return diffDays(s, e) + 1; }
+
+  var DOW = ['日', '月', '火', '水', '木', '金', '土'];
+  function formatDate(iso) {
+    if (!iso) return '—';
+    var d = parse(iso);
+    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + DOW[d.getDay()] + ')';
+  }
+
+  /** 予定進捗率（§3.1）。判定には使わない。進み具合を人が見るための数字 */
+  function plannedRate(start, end, today) {
+    if (!start || !end) return null;
+    var total = durationDays(start, end);
+    var passed = diffDays(start, today) + 1;
+    return Math.max(0, Math.min(1, passed / total));
+  }
+
+  /** 子を持たないタスクの進捗率（§3.2）。完了は必ず100% */
+  function leafRate(node) {
+    if (node.status === STATUS.DONE) return 1;
+    var v = node.progress_rate;
+    if (v === null || v === undefined || v === '') return 0;
+    return Math.max(0, Math.min(1, Number(v) / 100));
+  }
+
+  function average(rates) {
+    if (!rates.length) return 0;
+    var sum = 0;
+    rates.forEach(function (r) { sum += r; });
+    return sum / rates.length;
+  }
+
+  /**
+   * 状態の判定（§3.3）。上から順に、最初に合致したもの。
+   * 簡易版では「遅延」は終了日を過ぎて未完了のときだけ。進捗率は使わない。
+   */
+  function judge(status, start, end, today) {
+    if (status === STATUS.DONE) return 'done';
+    if (end && today > end) return 'delayed';
+    if (!start || !end) return 'no_period';
+    if (today < start) return 'not_started';
+    return 'on_track';
+  }
+
+  /** 1件ぶんの計算 */
+  function evaluate(node, children, today) {
+    var hasChildren = children.length > 0;
+    var actualRate = hasChildren
+      ? average(children.map(function (c) { return c.calc.actualRate; }))
+      : leafRate(node);
+    var planned = plannedRate(node.start_date, node.end_date, today);
+    var health = judge(node.status, node.start_date, node.end_date, today);
+    var remainingDays = node.end_date ? diffDays(today, node.end_date) : null;
+    var overDays = (remainingDays !== null && remainingDays < 0 && node.status !== STATUS.DONE) ? -remainingDays : 0;
+
+    var delayedInside = 0;
+    children.forEach(function (c) {
+      if (c.calc.health === 'delayed') delayedInside++;
+      delayedInside += c.calc.delayedInside;
+    });
+
+    return {
+      actualRate: actualRate,
+      plannedRate: planned,
+      health: health,
+      hasChildren: hasChildren,
+      remainingDays: remainingDays,
+      overDays: overDays,
+      delayedInside: delayedInside,
+      doneCount: children.filter(function (c) { return c.node.status === STATUS.DONE; }).length,
+      childCount: children.length
+    };
+  }
+
+  /** プロジェクト1件を、配下のタスクごとツリーにする */
+  function evaluateTree(project, items, today) {
+    var byParent = {};
+    items.forEach(function (it) {
+      if (Number(it.level) !== 2) return;
+      (byParent[it.parent_item_id] = byParent[it.parent_item_id] || []).push(it);
+    });
+    var bySort = function (a, b) { return (a.sort_order || 0) - (b.sort_order || 0); };
+
+    var tasks = items.filter(function (it) { return Number(it.level) === 1; }).sort(bySort).map(function (t) {
+      var subs = (byParent[t.item_id] || []).sort(bySort).map(function (s) {
+        return { node: s, calc: evaluate(s, [], today), children: [] };
+      });
+      return { node: t, calc: evaluate(t, subs, today), children: subs };
+    });
+    return { node: project, calc: evaluate(project, tasks, today), children: tasks };
+  }
+
+  function flatten(tree) {
+    var out = [];
+    tree.children.forEach(function (t) {
+      out.push(t);
+      t.children.forEach(function (s) { out.push(s); });
+    });
+    return out;
+  }
+
+  function pct(rate) { return rate === null || rate === undefined ? '—' : Math.round(rate * 100) + '%'; }
+
+  return {
+    STATUS: STATUS, STATUS_LABEL: STATUS_LABEL, STATUS_ORDER: STATUS_ORDER,
+    TYPE_LABEL: TYPE_LABEL, HEALTH_LABEL: HEALTH_LABEL, HEALTH_ICON: HEALTH_ICON,
+    parse: parse, toISO: toISO, diffDays: diffDays, addDays: addDays, durationDays: durationDays,
+    formatDate: formatDate, plannedRate: plannedRate, leafRate: leafRate,
+    judge: judge, evaluate: evaluate, evaluateTree: evaluateTree, flatten: flatten, pct: pct
+  };
+})();
+</script>

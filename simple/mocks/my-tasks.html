@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>マイタスク｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  input.rate { width: 62px; text-align: right; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1 id="title">—</h1>
+          <div class="sub">アサインされたタスクを、プロジェクトをまたいで期限順に並べています</div></div>
+        <span class="spacer"></span>
+        <div class="btn-row"><a class="btn" id="lnk-me" href="member.html">自分の個人ページ</a></div>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="card">
+        <div class="tabs" id="tabs" style="padding:0 14px"></div>
+        <div class="card-body tight" id="list"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-4-1〜F-4-7</li>
+          <li>マイタスクは<strong>自分専用</strong>です。他の人の状況は担当者一覧から個人ページで見ます（F-4-6）。ヘッダー右の名前は、モックでログイン中の人を切り替えるためのものです。</li>
+          <li>行からステータスと進捗率をその場で変えられます（画面遷移なし）。担当者が現場のスマホから触る前提です。</li>
+          <li>スマホでは画面下のタブバーに切り替わります。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'my-tasks', view: 'people' });
+
+  var me = D.me();
+  document.getElementById('title').textContent = me.name + ' さんのタスク';
+  document.getElementById('lnk-me').href = 'member.html?user=' + me.userId;
+
+  var tab = 'delayed';
+  var ORDER = ['delayed', 'today', 'week', 'later', 'done'];
+
+  function collect() {
+    var mine = [];
+    D.allTrees().forEach(function (t) {
+      H.flatten(t).forEach(function (r) {
+        if (r.calc.hasChildren) return;
+        if (r.node.assigneeUserId !== me.userId) return;
+        mine.push({ node: r.node, calc: r.calc, project: t.node, group: U.dueGroup(r.node, r.calc) });
+      });
+    });
+    return mine;
+  }
+
+  var COLS = '<colgroup><col><col class="col-hide" style="width:220px">' +
+    '<col style="width:124px"><col style="width:136px">' +
+    '<col style="width:104px"><col style="width:120px"></colgroup>';
+
+  function render() {
+    var mine = collect();
+    var byGroup = {};
+    ORDER.forEach(function (k) { byGroup[k] = mine.filter(function (m) { return m.group === k; }); });
+    var open = mine.filter(function (m) { return m.node.status !== 'done'; });
+
+    document.getElementById('stats').innerHTML = [
+      ['delayed', '遅延', byGroup.delayed.length],
+      ['at_risk', '今日期限', byGroup.today.length],
+      ['on_track', '今週', byGroup.week.length],
+      ['not_started', '未完了', open.length],
+      ['done', '完了', byGroup.done.length]
+    ].map(function (r) {
+      return '<div class="stat ' + r[0] + '"><div class="label">' + r[1] + '</div>' +
+        '<div class="value">' + r[2] + '<span class="unit">件</span></div></div>';
+    }).join('');
+
+    document.getElementById('tabs').innerHTML = ORDER.map(function (k) {
+      return '<button class="' + (k === tab ? 'active' : '') + '" data-tab="' + k + '">' +
+        U.DUE_LABEL[k] + '<span class="count">' + byGroup[k].length + '</span></button>';
+    }).join('');
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.addEventListener('click', function () { tab = this.getAttribute('data-tab'); render(); });
+    });
+
+    var rows = byGroup[tab];
+    var el = document.getElementById('list');
+    el.innerHTML = rows.length
+      ? '<table class="tbl fixed">' + COLS + '<tbody>' + rows.map(function (m) {
+          var n = m.node;
+          return '<tr>' +
+            '<td>' + U.taskCell(n, { project: true, parent: true }) + '</td>' +
+            '<td class="small col-hide" style="white-space:nowrap">' + U.periodText(n.startDate, n.endDate) + '</td>' +
+            '<td class="small" style="white-space:nowrap">' + U.dueText(m.calc) + '</td>' +
+            '<td><select class="inline" data-id="' + n.itemId + '" aria-label="ステータス">' +
+              H.STATUS_ORDER.map(function (s) {
+                return '<option value="' + s + '"' + (s === n.status ? ' selected' : '') + '>' + H.STATUS_LABEL[s] + '</option>';
+              }).join('') + '</select></td>' +
+            '<td style="white-space:nowrap"><input class="rate" type="number" min="0" max="100" step="5" data-id="' +
+              n.itemId + '" value="' + Math.round(m.calc.actualRate * 100) + '" aria-label="進捗率">%</td>' +
+            '<td>' + U.healthBadge(m.calc.health) + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="empty">この区分のタスクはありません</div>';
+
+    el.querySelectorAll('select[data-id]').forEach(function (s) {
+      s.addEventListener('change', function () {
+        var item = D.itemById(this.getAttribute('data-id'));
+        item.status = this.value;
+        if (this.value === 'done') item.progressRate = 100;
+        render();
+      });
+    });
+    el.querySelectorAll('input.rate').forEach(function (i) {
+      i.addEventListener('change', function () {
+        var item = D.itemById(this.getAttribute('data-id'));
+        item.progressRate = Math.max(0, Math.min(100, Number(this.value) || 0));
+        render();
+      });
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

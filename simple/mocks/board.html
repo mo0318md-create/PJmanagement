@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ボード｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .board { display: grid; grid-template-columns: repeat(4, minmax(210px, 1fr)); gap: 12px; align-items: start; }
+  .col { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; min-height: 140px; }
+  .col.over { border-color: var(--accent); background: var(--accent-soft); }
+  .col-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 700; }
+  .col-head .n { font-size: 13px; color: var(--text-muted); font-weight: 400; }
+  .col-body { padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+  .tcard { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; cursor: grab; }
+  .tcard:hover { border-color: var(--accent); }
+  .tcard.dragging { opacity: .45; }
+  .tcard .t { font-size: 15px; font-weight: 600; margin: 4px 0 6px; line-height: 1.45; }
+  .tcard .foot { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+  .tcard .top { display: flex; align-items: center; gap: 6px; }
+  .tcard .key { font-size: 12px; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  @media (max-width: 900px) { .board { grid-template-columns: repeat(4, 210px); } .board-wrap { overflow-x: auto; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb"></div>
+      <div class="page-head">
+        <div><h1 id="p-name">—</h1><div class="sub">カードをドラッグするとステータスが変わります</div></div>
+        <span class="spacer"></span>
+        <div class="filters">
+          <select class="inline" id="f-assignee" aria-label="担当者で絞り込み"></select>
+          <a class="btn" id="btn-add" href="task-edit.html">＋ タスクを追加</a>
+        </div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+
+      <div class="board-wrap"><div class="board" id="board"></div></div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-15（ボード）／F-2-2（ステータス）</li>
+          <li>列は<strong>未着手・進行中・保留・完了</strong>の4つ固定です。完全版にあった「プロジェクトごとに列名を変える」機能は簡易版では持ちません。</li>
+          <li>完了の列に入れると、進捗率は自動で100%になります。</li>
+          <li>ドラッグできない環境のために、カードのメニューからも変えられるようにします（モックでは未実装）。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+
+  var project = U.currentProject();
+  U.projectTabs(project, 'board');
+  document.getElementById('p-name').textContent = project.name;
+  document.getElementById('btn-add').href = 'task-edit.html?project=' + project.projectId;
+
+  var sel = document.getElementById('f-assignee');
+  sel.innerHTML = ['<option value="">担当者：すべて</option>', '<option value="@none">未アサイン</option>']
+    .concat(D.users.map(function (u) { return '<option value="' + u.userId + '">' + U.esc(u.name) + '</option>'; })).join('');
+  sel.addEventListener('change', render);
+
+  function render() {
+    var fa = sel.value;
+    var items = D.itemsOf(project.projectId).filter(function (x) {
+      if (fa === '@none') return !x.assigneeUserId;
+      return !fa || x.assigneeUserId === fa;
+    });
+    var ctx = D.ctx();
+
+    document.getElementById('board').innerHTML = H.STATUS_ORDER.map(function (st) {
+      var list = items.filter(function (x) { return x.status === st; });
+      return '<div class="col" data-status="' + st + '">' +
+        '<div class="col-head">' + H.STATUS_LABEL[st] + '<span class="n">' + list.length + '</span></div>' +
+        '<div class="col-body">' + (list.length ? list.map(card).join('')
+          : '<div class="empty small">なし</div>') + '</div></div>';
+
+      function card(x) {
+        var kids = items.filter(function (k) { return k.parentItemId === x.itemId; })
+          .map(function (k) { return { node: k, calc: H.evaluate(k, [], ctx) }; });
+        var calc = H.evaluate(x, kids, ctx);
+        var parent = x.parentItemId ? D.itemById(x.parentItemId) : null;
+        return '<div class="tcard" draggable="true" data-id="' + x.itemId + '">' +
+          '<div class="top">' + U.typeChip(x.itemType) +
+            '<span class="key">' + U.esc(x.itemKey) + '</span>' +
+            '<span style="flex:1"></span>' + U.healthBadge(calc.health) + '</div>' +
+          '<div class="t">' + U.esc(x.name) + '</div>' +
+          (parent ? '<div class="small faint" style="margin:-3px 0 6px">└ ' + U.esc(parent.name) + '</div>' : '') +
+          '<div class="cfoot">' + U.progressCell(calc) + '</div>' +
+          '<div class="foot">' + U.assignee(x.assigneeUserId) +
+            '<span style="flex:1"></span>' + U.dueText(calc) + '</div>' +
+        '</div>';
+      }
+    }).join('');
+
+    wire();
+  }
+
+  // ---- ドラッグでステータス変更 ----
+  var dragId = null;
+  function wire() {
+    document.querySelectorAll('.tcard').forEach(function (el) {
+      el.addEventListener('dragstart', function (e) {
+        dragId = this.getAttribute('data-id');
+        this.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', dragId);
+      });
+      el.addEventListener('dragend', function () { this.classList.remove('dragging'); });
+      el.addEventListener('dblclick', function () {
+        location.href = 'task-edit.html?id=' + this.getAttribute('data-id');
+      });
+    });
+    document.querySelectorAll('.col').forEach(function (col) {
+      col.addEventListener('dragover', function (e) { e.preventDefault(); this.classList.add('over'); });
+      col.addEventListener('dragleave', function () { this.classList.remove('over'); });
+      col.addEventListener('drop', function (e) {
+        e.preventDefault();
+        this.classList.remove('over');
+        var item = D.itemById(dragId);
+        if (!item) return;
+        var st = this.getAttribute('data-status');
+        if (item.status === st) return;
+        item.status = st;
+        // 完了にしたら進捗率100%（要件 §3.2）
+        if (st === 'done' && item.progressRate !== null) item.progressRate = 100;
+        render();
+      });
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>タスクの編集｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div>
+          <h1>タスクの編集（モーダル）</h1>
+          <div class="sub">タスク一覧やツリーから開かれる編集ダイアログです。背景は呼び出し元の画面です。</div>
+        </div>
+      </div>
+      <div class="callout small">
+        このモックではモーダルを単体で確認できるよう、常に開いた状態で表示しています。
+        実装ではプロジェクト詳細・マイタスクの行クリックで開きます。
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-4（タスクの編集）／F-2-1（期間）／F-2-2（ステータス）／F-2-10（親期間からのはみ出し警告）</li>
+          <li>フォームを変更すると、下部の「判定プレビュー」がその場で再計算されます。保存前に順調／遅延がどう変わるか確認できます。</li>
+          <li>進捗率の入力欄は、プロジェクトの判定モードが「進捗率手入力」のときだけ有効になります。</li>
+          <li>子タスクを持つタスクの実績は、子を<strong>加重した平均</strong>です（半日の作業と2週間の作業を同じ重みにしない）。重みは設定で「期間日数」か「作業の重さ」を選べます。</li>
+          <li>終了日を後ろへずらすと「当初比」が増えます。<strong>当初日程での健全性</strong>は当初計画（計画確定時の日付）で計算するので、日程を延ばしても遅れは消えません。</li>
+          <li>作業の重さは「予定工数(h) ＞ サイズ ＞ 期間からの自動推定」の順で決まります。未入力でも推定値が入るので、担当者別の負荷（F-4-13）は今日から使えます。</li>
+          <li>実績開始日・実績終了日（F-2-17）：ステータスの分類が初めて進行中／完了になった日を自動で入れます。記録漏れや後からの入力に備えて手で直せ、直した場合は「手修正」として更新履歴に残します。子タスクを持つタスクは配下から求めるので入力できません。</li>
+          <li>マイルストーン（F-3-14）とラベル（F-5-6）はここで付け外しします。マイルストーンの作成・期日はプロジェクト設定、ラベルの作成・色は設定画面で管理します。</li>
+          <li>未確定: 完了にしたとき、未完了の子タスクが残っている場合の扱い（警告のみ / 一括完了の確認）。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ===== モーダル ===== -->
+<div class="modal-backdrop" id="backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+    <div class="m-head">
+      <h2 id="m-title">タスクを編集</h2>
+      <span class="tag" id="m-level">—</span>
+      <span class="spacer"></span>
+      <a class="btn ghost sm" id="m-close" href="#">✕</a>
+    </div>
+    <div class="m-body">
+      <div class="breadcrumb" id="m-path">—</div>
+
+      <div class="field">
+        <label for="e-name">名称<span class="req">必須</span></label>
+        <input type="text" id="e-name">
+      </div>
+
+      <div class="field">
+        <label for="e-desc">説明</label>
+        <textarea id="e-desc"></textarea>
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="e-assignee">担当者</label>
+          <select id="e-assignee"></select>
+        </div>
+        <div class="field">
+          <label for="e-status">ステータス</label>
+          <select id="e-status"></select>
+          <div class="help" id="status-help">—</div>
+        </div>
+        <div class="field">
+          <label for="e-start">開始日</label>
+          <input type="date" id="e-start">
+        </div>
+        <div class="field">
+          <label for="e-end">終了日</label>
+          <input type="date" id="e-end">
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="e-size">作業の重さ（サイズ）</label>
+          <select id="e-size"></select>
+          <div class="help" id="size-help">—</div>
+        </div>
+        <div class="field">
+          <label for="e-hours">予定工数(h)<span class="tag" style="margin-left:6px">任意</span></label>
+          <input type="number" id="e-hours" min="0" step="0.5" placeholder="時間で入れる場合のみ">
+          <div class="help">入れるとサイズより優先します（8h = 1人日）。</div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="e-astart">実績開始日</label>
+          <input type="date" id="e-astart">
+          <div class="help" id="astart-help">—</div>
+        </div>
+        <div class="field">
+          <label for="e-aend">実績終了日</label>
+          <input type="date" id="e-aend">
+          <div class="help" id="aend-help">—</div>
+        </div>
+        <div class="field">
+          <label for="e-ms">マイルストーン</label>
+          <select id="e-ms"></select>
+          <div class="help"><a id="ms-link" href="#">マイルストーンを管理</a>（プロジェクト設定）</div>
+        </div>
+        <div class="field">
+          <span style="display:block;font-size:12px;font-weight:700;margin-bottom:4px">ラベル</span>
+          <div id="e-labels" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          <div class="help"><a href="settings.html">ラベルを管理</a>（設定）</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="e-rate">進捗率(%)<span class="tag" id="rate-mode" style="margin-left:6px">—</span></label>
+        <input type="number" id="e-rate" min="0" max="100" step="5">
+        <div class="help" id="rate-help">—</div>
+      </div>
+
+      <div id="warn-area"></div>
+
+      <div class="card" style="margin:16px 0 0;box-shadow:none">
+        <div class="card-head"><h3>判定プレビュー</h3><span class="spacer"></span><span id="pv-badge"></span></div>
+        <div class="card-body">
+          <div id="pv-bar"></div>
+          <div class="kv" style="margin-top:12px" id="pv-kv"></div>
+        </div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn danger sm" id="btn-del">削除</button>
+      <span class="spacer"></span>
+      <a class="btn" id="btn-cancel" href="#">キャンセル</a>
+      <button class="btn primary" id="btn-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  UI.renderShell({ active: 'dashboard', view: 'project' });
+
+  var item = D.itemById(U.qs('id', 'i102')) || D.items[0];
+  var project = D.projectById(item.projectId);
+  var mode = D.modeOf(project);
+  var parent = item.parentItemId ? D.itemById(item.parentItemId) : null;
+
+  var back = 'project-detail.html?id=' + project.projectId;
+  document.getElementById('m-close').href = back;
+  document.getElementById('btn-cancel').href = back;
+
+  // ---- 初期値 ----
+  document.getElementById('m-level').textContent = item.level === 1 ? 'タスク（第2階層）' : '子タスク（第3階層）';
+  document.getElementById('m-path').innerHTML =
+    '<a href="' + back + '">' + U.esc(project.name) + '</a>' +
+    (parent ? ' ／ ' + U.esc(parent.name) : '');
+
+  document.getElementById('e-name').value = item.name;
+  document.getElementById('e-desc').value = item.description || '';
+  // ステータスの選択肢はこのプロジェクトのステータス列から作る
+  var statusEl = document.getElementById('e-status');
+  statusEl.innerHTML = H.statusesOf(project).map(function (s) {
+    return '<option value="' + U.esc(s.key) + '">' + U.esc(s.label) + '</option>';
+  }).join('');
+  statusEl.value = item.statusKey;
+  document.getElementById('e-start').value = item.startDate || '';
+  document.getElementById('e-end').value = item.endDate || '';
+  document.getElementById('e-rate').value =
+    typeof item.progressRate === 'number' ? item.progressRate : '';
+
+  document.getElementById('e-assignee').innerHTML =
+    '<option value="">未アサイン</option>' + D.users.map(function (u) {
+      return '<option value="' + u.userId + '"' + (u.userId === item.assigneeUserId ? ' selected' : '') + '>' +
+        U.esc(u.name) + '</option>';
+    }).join('');
+
+  // ---- 進捗率欄の有効／無効（判定モード依存） ----
+  var rateEl = document.getElementById('e-rate');
+  document.getElementById('rate-mode').textContent = 'このPJの判定: ' + H.MODE_LABEL[mode];
+  if (mode === 'manual') {
+    document.getElementById('rate-help').textContent =
+      '判定モードが「進捗率手入力」のため、この値が予定進捗との比較に使われます。';
+  } else {
+    rateEl.disabled = true;
+    document.getElementById('rate-help').textContent =
+      '判定モードが「' + H.MODE_LABEL[mode] + '」のため、この値は判定に使われません（記録用）。';
+  }
+
+  // ---- 作業の重さ（サイズ・予定工数） ----
+  var sizeEl = document.getElementById("e-size");
+  var hoursEl = document.getElementById("e-hours");
+  var sizeDays = D.settings.sizeDays;
+  sizeEl.innerHTML = '<option value="">自動（期間から推定）</option>' + H.SIZE_ORDER.map(function (k) {
+    return '<option value="' + k + '">' + H.SIZE_LABEL[k] + ' ─ ' + sizeDays[k] + '人日</option>';
+  }).join("");
+  sizeEl.value = item.sizeKey || "";
+  hoursEl.value = typeof item.estimateHours === "number" ? item.estimateHours : "";
+
+  // ---- 実績日（自動記録。手で直すと「手修正」として履歴に残す） ----
+  var aStartEl = document.getElementById('e-astart');
+  var aEndEl = document.getElementById('e-aend');
+  aStartEl.value = item.actualStartDate || '';
+  aEndEl.value = item.actualEndDate || '';
+  var origAStart = aStartEl.value, origAEnd = aEndEl.value;
+
+  // ---- マイルストーン・ラベル ----
+  var msEl = document.getElementById('e-ms');
+  msEl.innerHTML = '<option value="">（なし）</option>' + D.milestonesOf(project.projectId).map(function (m) {
+    return '<option value="' + m.milestoneId + '"' + (m.milestoneId === item.milestoneId ? ' selected' : '') + '>' +
+      U.esc(m.name) + '（' + H.formatDate(m.date) + '）</option>';
+  }).join('');
+  document.getElementById('ms-link').href = 'project-settings.html?id=' + project.projectId;
+  var labelSel = (item.labelIds || []).slice();
+  function renderLabels() {
+    document.getElementById('e-labels').innerHTML = D.labels.map(function (l) {
+      var on = labelSel.indexOf(l.labelId) >= 0;
+      return '<button type="button" class="btn sm" data-lb="' + l.labelId + '" aria-pressed="' + on + '" style="background:' +
+        (on ? l.color : 'transparent') + ';' + (on ? 'font-weight:700' : 'color:var(--text-muted)') + '">' + (on ? '✓ ' : '') + U.esc(l.name) + '</button>';
+    }).join('');
+    document.querySelectorAll('[data-lb]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-lb'), i = labelSel.indexOf(id);
+        if (i >= 0) labelSel.splice(i, 1); else labelSel.push(id);
+        renderLabels();
+      });
+    });
+  }
+  renderLabels();
+
+  // ---- 判定プレビュー ----
+  // 評価済みツリーから、このタスクの子（calc 付き）を取る
+  var node = H.flatten(U.projectTree(project)).filter(function (n) { return n.itemId === item.itemId; })[0];
+  var children = node ? node.children : [];
+  var bStart = item.baselineStartDate || null;
+  var bEnd = item.baselineEndDate || null;
+
+  function preview() {
+    var statusKey = statusEl.value;
+    var cat = H.statusCategory(project, statusKey);
+    var start = document.getElementById('e-start').value || null;
+    var end = document.getElementById('e-end').value || null;
+    var rate = rateEl.value === '' ? undefined : Number(rateEl.value);
+    var ctx = { mode: mode, today: D.today, thresholds: D.thresholds() };
+
+    document.getElementById('status-help').textContent =
+      '分類: ' + H.CATEGORY_LABEL[cat] + ' ─ 判定はこの分類だけを見ます';
+
+    // 実績：子を持つなら子の期間日数で加重平均（§3.2.1）
+    var actual, basis;
+    if (mode === 'manual' && typeof rate === 'number') { actual = H.clamp(rate / 100, 0, 1); basis = '手入力の進捗率'; }
+    else if (cat === 'done') { actual = 1; basis = '分類が完了'; }
+    else if (children.length) {
+      var wOpt = { rollupWeight: D.settings.rollupWeight, effort: D.effortSettings() };
+      actual = H.rollupRate(children, wOpt);
+      basis = '子タスク ' + children.length + ' 件を' + (D.settings.rollupWeight === "effort" ? "重さ" : "期間日数") + 'で加重';
+    }
+    else { actual = H.categoryRate(cat); basis = '分類「' + H.CATEGORY_LABEL[cat] + '」の換算'; }
+
+    // 重さ（人日）: 予定工数 > サイズ > 期間からの推定
+    // 実績日：子を持つタスクは配下から自動で求めるので入力させない
+    var hasKids = children.length > 0;
+    aStartEl.disabled = hasKids; aEndEl.disabled = hasKids || cat !== 'done';
+    var nodeCalc = node ? node.calc : {};
+    document.getElementById('astart-help').textContent = hasKids
+      ? '配下から自動（' + (nodeCalc.actualStart ? H.formatDate(nodeCalc.actualStart) : '未着手') + '）'
+      : (aStartEl.value !== origAStart ? '手修正（保存すると履歴に残ります）' : (origAStart ? 'ステータス変更時に自動で記録' : '進行中にすると今日の日付が入ります'));
+    document.getElementById('aend-help').textContent = hasKids
+      ? '配下から自動（' + (nodeCalc.actualEnd ? H.formatDate(nodeCalc.actualEnd) : '—') + '）'
+      : (cat !== 'done' ? '完了にすると今日の日付が入ります' : (aEndEl.value !== origAEnd ? '手修正（保存すると履歴に残ります）' : '完了にした日を自動で記録'));
+    var aS = hasKids ? nodeCalc.actualStart : (aStartEl.value || null);
+    var aE = hasKids ? nodeCalc.actualEnd : (cat === 'done' ? (aEndEl.value || null) : null);
+    var yjText = !aS ? (start && start < D.today ? '<span class="delay-note">未着手（開始遅れ+' + H.diffDays(start, D.today) + '日）</span>' : '<span class="faint">未着手</span>')
+      : '<span class="num small">' + H.formatDate(aS) + ' 〜 ' + (aE ? H.formatDate(aE) : '進行中') + '</span>' +
+        (start ? ' <span class="small ' + (H.diffDays(start, aS) > 0 ? 'delay-note' : 'muted') + '">開始' + (H.diffDays(start, aS) >= 0 ? '+' : '') + H.diffDays(start, aS) + '日</span>' : '') +
+        (aE && end ? ' <span class="small ' + (H.diffDays(end, aE) > 0 ? 'delay-note' : 'muted') + '">終了' + (H.diffDays(end, aE) >= 0 ? '+' : '') + H.diffDays(end, aE) + '日</span>' : '');
+
+    var eff = H.effortDays({
+      estimateHours: hoursEl.value === "" ? undefined : Number(hoursEl.value),
+      sizeKey: sizeEl.value,
+      startDate: start, endDate: end
+    }, D.effortSettings());
+    var effDays = children.length
+      ? children.reduce(function (t, c) { return t + c.calc.effortDays; }, 0) : eff.days;
+    document.getElementById("size-help").textContent = children.length
+      ? "子タスクを持つため、重さは配下の合計（" + U.days(effDays) + "）になります"
+      : (eff.source === "hours" ? "予定工数から " + U.days(eff.days) + "（サイズより優先）"
+        : eff.source === "size" ? "サイズ " + eff.sizeKey + " ＝ " + U.days(eff.days)
+          : "期間 " + H.durationDays(start, end) + "日から " + eff.sizeKey + "（" + U.days(eff.days) + "）と推定中");
+
+    var health = H.judge({ statusCategory: cat, startDate: start, endDate: end, actualRate: actual }, ctx);
+    var planned = H.plannedRate(start, end, D.today);
+    var remaining = end ? H.diffDays(D.today, end) : null;
+    var calc = {
+      actualRate: actual, plannedRate: planned, health: health,
+      delayDays: (remaining !== null && remaining < 0 && cat !== 'done') ? -remaining : 0,
+      remainingDays: remaining
+    };
+
+    // 当初計画（ベースライン）との比較。終了日を延ばしても当初日程での健全性は変わらない
+    var hasBase = !!(bStart && bEnd);
+    var slip = hasBase && end ? H.diffDays(bEnd, end) : null;
+    var baseHealth = hasBase ? H.judge({ statusCategory: cat, startDate: bStart, endDate: bEnd, actualRate: actual }, ctx) : null;
+
+    document.getElementById('pv-badge').innerHTML = U.healthBadge(health);
+    document.getElementById('pv-bar').innerHTML = U.progressBar(calc);
+    document.getElementById('pv-kv').innerHTML = [
+      ['実績進捗', H.pct(actual) + '<div class="small faint" style="font-weight:400">' + U.esc(basis) + '</div>'],
+      ['予定進捗', H.pct(planned)],
+      ['差分', planned === null ? '—' :
+        ((actual - planned >= 0 ? '+' : '') + Math.round((actual - planned) * 100) + ' pt')],
+      ['期限まで', remaining === null ? '—' :
+        (remaining < 0 ? '<span class="delay-note">' + (-remaining) + '日超過</span>' : 'あと ' + remaining + ' 日')],
+      ['当初計画', hasBase ? U.periodText(bStart, bEnd) : '<span class="faint">未設定</span>'],
+      ['当初比', slip === null ? '—' :
+        (slip > 0 ? '<span class="delay-note">+' + slip + '日（後ろ倒し）</span>'
+          : (slip < 0 ? '<span style="color:var(--h-on-track);font-weight:700">' + slip + '日（前倒し）</span>' : '<span class="muted">当初どおり</span>'))],
+      ['当初日程での健全性', baseHealth ? U.healthBadge(baseHealth) : '—'],
+      ['実績（予実）', yjText],
+      ['作業の重さ', U.days(effDays) + '<div class="small faint" style="font-weight:400">' +
+        (children.length ? '配下の合計' : eff.source === "hours" ? '予定工数から' : eff.source === "size" ? 'サイズ ' + eff.sizeKey : '期間からの推定（未入力）') + '</div>']
+    ].map(function (r) {
+      return '<div><div class="k">' + r[0] + '</div><div class="v num">' + r[1] + '</div></div>';
+    }).join('');
+
+    // 親期間からのはみ出し警告（F-2-10）
+    var warn = [];
+    if (start && end && start > end) warn.push('開始日が終了日より後になっています。');
+    if (parent && start && parent.startDate && start < parent.startDate) {
+      warn.push('開始日が親タスク「' + parent.name + '」の開始日（' + H.formatDate(parent.startDate) + '）より前です。');
+    }
+    if (parent && end && parent.endDate && end > parent.endDate) {
+      warn.push('終了日が親タスク「' + parent.name + '」の終了日（' + H.formatDate(parent.endDate) + '）を超えています。');
+    }
+    document.getElementById('warn-area').innerHTML = warn.length
+      ? '<div class="callout warn small">⚠ ' + warn.map(U.esc).join('<br>⚠ ') + '</div>' : '';
+  }
+
+  ['e-status', 'e-start', 'e-end', 'e-rate', 'e-size', 'e-hours', 'e-astart', 'e-aend'].forEach(function (id) {
+    document.getElementById(id).addEventListener('input', preview);
+    document.getElementById(id).addEventListener('change', preview);
+  });
+
+  document.getElementById('btn-save').addEventListener('click', function () {
+    alert('［モック］保存しました。実装ではここでプロジェクトの集計キャッシュを再計算します。');
+    location.href = back;
+  });
+  document.getElementById('btn-del').addEventListener('click', function () {
+    if (confirm('このタスクを削除しますか？（配下の子タスクも削除されます）')) location.href = back;
+  });
+
+  preview();
+})();
+</script>
+</body>
+</html>

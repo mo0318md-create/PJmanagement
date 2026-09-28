@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト作成｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .row2 { grid-template-columns: 1fr; } }
+  .tpl { display: grid; gap: 8px; }
+  .tpl label { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+  .tpl label:hover { border-color: var(--accent); }
+  .tpl input:checked + span { font-weight: 700; color: var(--accent); }
+  .pv-row { display: grid; grid-template-columns: 1fr 190px; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 15px; align-items: center; }
+  .pv-row.lv2 { padding-left: 30px; color: var(--text-muted); font-size: 14px; }
+  .pv-row .d { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: right; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>プロジェクトを作成</h1>
+          <div class="sub">テンプレートを選ぶと、配下のタスクと設定項目が自動で用意されます</div></div>
+        <span class="spacer"></span>
+        <div class="btn-row"><button class="btn primary" id="btn-create">この内容で作成</button></div>
+      </div>
+
+      <div class="cols">
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-head"><h2>1. テンプレートを選ぶ</h2></div>
+            <div class="card-body"><div class="tpl" id="tpl"></div></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>2. 基本情報</h2></div>
+            <div class="card-body">
+              <div class="field"><label for="f-name">プロジェクト名</label><input id="f-name" type="text" placeholder="例：コーポレートサイトリニューアル"></div>
+              <div class="row2">
+                <div class="field"><label for="f-key">キー</label><input id="f-key" type="text"></div>
+                <div class="field"><label for="f-owner">オーナー</label><select id="f-owner"></select></div>
+              </div>
+              <div class="row2">
+                <div class="field"><label for="f-start">開始日</label><input id="f-start" type="date"></div>
+                <div class="field"><label>終了日</label>
+                  <input id="f-end" type="text" disabled>
+                  <div class="help">テンプレートのいちばん後ろのタスクから自動で決まります</div></div>
+              </div>
+              <div id="custom"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>3. 作成されるタスク</h2><span class="tag" id="pv-count">—</span></div>
+          <div class="card-body tight" id="preview"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-1-1（自動生成）／F-1-5（設定項目を動的に表示）／F-1-6（作成前のプレビュー）／F-1-11（テンプレートなし）</li>
+          <li>テンプレートの日付は「開始日からの相対日数」で持っています（F-1-2）。開始日を変えると、右のプレビューの日付が全部ずれます。</li>
+          <li>設定項目の欄は、選んだテンプレートによって入れ替わります。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'new', view: 'project' });
+
+  var current = 'tpl_web';
+
+  document.getElementById('tpl').innerHTML = D.templates.map(function (t) {
+    return '<label><input type="radio" name="tpl" value="' + t.templateId + '"' +
+      (t.templateId === current ? ' checked' : '') + '><span>' + U.esc(t.name) +
+      '<div class="small muted" style="font-weight:400;color:var(--text-muted)">' + U.esc(t.description) +
+      ' ・ タスク ' + D.templateItemsOf(t.templateId).filter(function (x) { return x.level === 1; }).length + ' 件</div></span></label>';
+  }).join('') +
+  '<label><input type="radio" name="tpl" value=""><span>テンプレートを使わない' +
+  '<div class="small muted" style="font-weight:400;color:var(--text-muted)">空のプロジェクトを作り、タスクは後から足します</div></span></label>';
+
+  document.getElementById('f-owner').innerHTML = D.users.map(function (u) {
+    return '<option value="' + u.userId + '"' + (u.userId === D.meUserId ? ' selected' : '') + '>' + U.esc(u.name) + '</option>';
+  }).join('');
+  document.getElementById('f-start').value = D.today;
+
+  document.querySelectorAll('input[name=tpl]').forEach(function (r) {
+    r.addEventListener('change', function () { current = this.value; renderCustom(); renderPreview(); });
+  });
+  document.getElementById('f-start').addEventListener('change', renderPreview);
+
+  function renderCustom() {
+    var fields = current ? D.fieldsOf(current) : [];
+    var tpl = current ? D.templateById(current) : null;
+    document.getElementById('f-key').value = tpl ? tpl.keyPrefix : '';
+    document.getElementById('custom').innerHTML = fields.length
+      ? '<h3 style="font-size: 15px;margin:18px 0 10px">このテンプレートの設定項目</h3>' + fields.map(function (f) {
+          var id = 'cf-' + f.fieldKey, input;
+          if (f.type === 'select') {
+            input = '<select id="' + id + '"><option value=""></option>' +
+              f.options.map(function (o) { return '<option>' + U.esc(o) + '</option>'; }).join('') + '</select>';
+          } else if (f.type === 'checkbox') {
+            input = '<label class="small"><input type="checkbox" id="' + id + '"> はい</label>';
+          } else {
+            var t = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+            input = '<input id="' + id + '" type="' + t + '">';
+          }
+          return '<div class="field"><label for="' + id + '">' + U.esc(f.label) +
+            (f.required ? ' <span class="delay-note">必須</span>' : '') + '</label>' + input + '</div>';
+        }).join('')
+      : '';
+  }
+
+  function renderPreview() {
+    var start = document.getElementById('f-start').value || D.today;
+    var list = current ? D.templateItemsOf(current) : [];
+    if (!list.length) {
+      document.getElementById('preview').innerHTML = '<div class="empty">タスクは作られません。作成後に手で足します</div>';
+      document.getElementById('pv-count').textContent = '0 件';
+      document.getElementById('f-end').value = '';
+      return;
+    }
+
+    var last = '';
+    var byParent = {};
+    list.forEach(function (t) { if (t.level === 2) (byParent[t.parent] = byParent[t.parent] || []).push(t); });
+
+    function line(t, lv) {
+      var s = H.addDays(start, t.startOffsetDays);
+      var e = H.addDays(s, t.durationDays - 1);
+      if (e > last) last = e;
+      return '<div class="pv-row' + (lv === 2 ? ' lv2' : '') + '"><div>' +
+        (lv === 2 ? '└ ' : '') + U.esc(t.name) + '</div>' +
+        '<div class="d">' + H.formatDate(s) + ' 〜 ' + H.formatDate(e) + '</div></div>';
+    }
+
+    var html = list.filter(function (t) { return t.level === 1; }).map(function (t) {
+      return line(t, 1) + (byParent[t.id] || []).map(function (s) { return line(s, 2); }).join('');
+    }).join('');
+
+    document.getElementById('preview').innerHTML = html;
+    document.getElementById('pv-count').textContent = list.length + ' 件';
+    document.getElementById('f-end').value = H.formatDateY(last);
+  }
+
+  document.getElementById('btn-create').addEventListener('click', function () {
+    var name = document.getElementById('f-name').value.trim();
+    if (!name) { alert('プロジェクト名を入れてください'); return; }
+    var miss = (current ? D.fieldsOf(current) : []).filter(function (f) {
+      if (!f.required) return false;
+      var el = document.getElementById('cf-' + f.fieldKey);
+      return el && !(f.type === 'checkbox' ? el.checked : el.value);
+    });
+    if (miss.length) { alert('必須の設定項目が空です：' + miss.map(function (f) { return f.label; }).join('、')); return; }
+    alert('作成しました（モック：一覧には追加されません）');
+    location.href = 'projects.html';
+  });
+
+  renderCustom();
+  renderPreview();
+})();
+</script>
+</body>
+</html>

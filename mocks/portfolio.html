@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全プロジェクトのガント｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="page-head">
+        <div>
+          <h1>全プロジェクトのガント</h1>
+          <div class="sub">プロジェクト単位 ─ 全プロジェクトを1本の時間軸に並べます。行を開くと配下のタスクまで降りられます</div>
+        </div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <a href="dashboard-manager.html">一覧</a>
+        <a href="portfolio.html" class="active">ガント</a>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>プロジェクト</h2>
+          <span class="chip" id="cnt">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label class="check-line small"><input type="checkbox" id="f-ms" checked> マイルストーンを表示</label>
+            <label class="check-line small"><input type="checkbox" id="f-done"> 完了も表示</label>
+            <button class="btn sm" id="btn-all">すべて開く</button>
+          </div>
+        </div>
+        <div class="card-body tight"><div id="gantt"></div></div>
+        <div class="card-head" style="border-bottom:none;border-top:1px solid var(--border)"><div id="legend"></div></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>キャンバスの ② に対応。プロジェクトの行は予定（上段）と実績（下段）の2段。実績はプロジェクト配下で最も早く始まった日から今日まで。</li>
+          <li>行の「開く」でタスク（第2階層）を表示します。子タスクまで見たいときはプロジェクト詳細のガントへ。</li>
+          <li>マイルストーンはプロジェクト名を頭に付けて◆で出します（多いときは消せます）。アーカイブ済みは出しません。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script src="assets/gantt.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'portfolio', view: 'project' });
+
+  var open = {};
+  var trees = U.allProjectTrees().filter(function (t) { return !t.archived; });
+
+  function render() {
+    var showDone = document.getElementById('f-done').checked;
+    var list = trees.filter(function (t) { return showDone || t.calc.health !== 'done'; })
+      .sort(function (a, b) { return a.startDate < b.startDate ? -1 : 1; });
+    var rows = [];
+    list.forEach(function (t) {
+      rows.push({
+        name: t.name, level: 1, startDate: t.startDate, endDate: t.endDate, calc: t.calc,
+        baselineStartDate: t.baselineStartDate, baselineEndDate: t.baselineEndDate,
+        href: 'project-detail.html?id=' + t.projectId,
+        tag: D.userName(t.ownerUserId) + (t.planStatus === 'planning' ? ' ・ 計画中' : ''),
+        nameExtraHtml: '<button class="btn sm" data-toggle="' + t.projectId + '">' + (open[t.projectId] ? '閉じる' : '開く') + '</button>'
+      });
+      if (!open[t.projectId]) return;
+      t.children.forEach(function (n) {
+        rows.push({
+          name: n.name, level: 2, startDate: n.startDate, endDate: n.endDate, calc: n.calc,
+          baselineStartDate: n.baselineStartDate, baselineEndDate: n.baselineEndDate,
+          href: 'task-edit.html?id=' + n.itemId,
+          tag: n.assigneeUserId ? D.userName(n.assigneeUserId) : '未アサイン'
+        });
+      });
+    });
+    var ms = document.getElementById('f-ms').checked ? D.milestones.filter(function (m) {
+      return list.some(function (t) { return t.projectId === m.projectId; });
+    }).map(function (m) {
+      var p = D.projectById(m.projectId);
+      return { date: m.date, name: p.name.slice(0, 6) + '…' + m.name, note: m.note };
+    }) : [];
+
+    document.getElementById('cnt').textContent = list.length + ' 件';
+    document.getElementById('gantt').innerHTML = U.ganttHtml(rows, { today: D.today, labelHead: 'プロジェクト ／ タスク（予定・実績）', milestones: ms });
+    document.getElementById('legend').innerHTML = U.ganttLegend();
+    document.querySelectorAll('[data-toggle]').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.preventDefault(); var id = b.getAttribute('data-toggle'); open[id] = !open[id]; render(); });
+    });
+    document.getElementById('btn-all').textContent = list.every(function (t) { return open[t.projectId]; }) ? 'すべて閉じる' : 'すべて開く';
+  }
+  document.getElementById('btn-all').addEventListener('click', function () {
+    var all = trees.every(function (t) { return open[t.projectId]; });
+    trees.forEach(function (t) { open[t.projectId] = !all; });
+    render();
+  });
+  ['f-ms', 'f-done'].forEach(function (id) { document.getElementById(id).addEventListener('change', render); });
+  render();
+})();
+</script>
+</body>
+</html>

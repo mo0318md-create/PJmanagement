@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>横断検索｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .cond { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .cond input[type=search] { min-width: 220px; flex: 1 1 220px; }
+  @media (max-width: 700px) { .cond select.inline { flex: 1 1 130px; max-width: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>横断検索</h1>
+          <div class="sub">全プロジェクトのタスクをまとめて探します</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body">
+          <div class="cond">
+            <input type="search" id="c-text" placeholder="タスク名・キーで探す（例：デザイン、CORP-8）" aria-label="文字で探す">
+            <select class="inline" id="c-pj" aria-label="プロジェクト"></select>
+            <select class="inline" id="c-as" aria-label="担当者"></select>
+            <select class="inline" id="c-st" aria-label="ステータス"></select>
+            <select class="inline" id="c-h" aria-label="状態"></select>
+            <select class="inline" id="c-due" aria-label="期限"></select>
+            <button class="btn sm" id="c-clear">条件をクリア</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>結果</h2><span class="tag" id="count">—</span>
+          <span class="spacer"></span>
+          <span class="small muted" id="loading"></span>
+        </div>
+        <div class="card-body tight" id="result"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-10（横断検索）</li>
+          <li>実装では、起動直後に裏でタスク全件を読み込んでおき、<strong>検索はブラウザの中だけで走ります</strong>（サーバーへ行かないので待ち時間がありません）。読み込みが終わるまではここに「読み込み中」を出します。</li>
+          <li>完全版にあった「条件に名前を付けて保存・共有する」機能（保存フィルタ）は簡易版では持ちません。必要になったら足せます。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'search', view: 'project' });
+
+  function opts(id, list) {
+    document.getElementById(id).innerHTML = list.map(function (o) {
+      return '<option value="' + o[0] + '">' + U.esc(o[1]) + '</option>';
+    }).join('');
+  }
+  opts('c-pj', [['', 'プロジェクト：すべて']].concat(D.projects.map(function (p) { return [p.projectId, p.name]; })));
+  opts('c-as', [['', '担当者：すべて'], ['@me', '自分'], ['@none', '未アサイン']]
+    .concat(D.users.map(function (u) { return [u.userId, u.name]; })));
+  opts('c-st', [['', 'ステータス：すべて']].concat(H.STATUS_ORDER.map(function (s) { return [s, H.STATUS_LABEL[s]]; })));
+  opts('c-h', [['', '状態：すべて'], ['delayed', '遅延'], ['on_track', '対応中'], ['not_started', '開始前'], ['done', '完了']]);
+  opts('c-due', [['', '期限：すべて'], ['delayed', '超過'], ['today', '今日'], ['week', '今週'], ['later', '以降'], ['no_date', '期限なし']]);
+
+  var IDS = ['c-text', 'c-pj', 'c-as', 'c-st', 'c-h', 'c-due'];
+  IDS.forEach(function (id) {
+    var el = document.getElementById(id);
+    el.addEventListener('input', render);
+    el.addEventListener('change', render);
+  });
+  document.getElementById('c-clear').addEventListener('click', function () {
+    IDS.forEach(function (id) { document.getElementById(id).value = ''; });
+    render();
+  });
+
+  // すべてのプロジェクトのタスクを、計算済みで平らに並べる
+  var all = [];
+  D.allTrees().forEach(function (t) {
+    H.flatten(t).forEach(function (r) { all.push({ node: r.node, calc: r.calc, project: t.node }); });
+  });
+  document.getElementById('loading').textContent =
+    '全 ' + all.length + ' 件を読み込み済み（実装では起動直後に裏で読み込みます）';
+
+  var COLS = '<colgroup><col><col class="col-hide" style="width:220px">' +
+    '<col style="width:120px"><col class="col-hide" style="width:160px">' +
+    '<col class="col-hide" style="width:124px"><col style="width:136px"></colgroup>';
+
+  function render() {
+    var text = document.getElementById('c-text').value.trim().toLowerCase();
+    var pj = document.getElementById('c-pj').value;
+    var as = document.getElementById('c-as').value;
+    var st = document.getElementById('c-st').value;
+    var h = document.getElementById('c-h').value;
+    var due = document.getElementById('c-due').value;
+
+    var rows = all.filter(function (r) {
+      var n = r.node;
+      if (text && (n.name + ' ' + n.itemKey).toLowerCase().indexOf(text) < 0) return false;
+      if (pj && n.projectId !== pj) return false;
+      if (as === '@me' && n.assigneeUserId !== D.meUserId) return false;
+      else if (as === '@none' && n.assigneeUserId) return false;
+      else if (as && as.charAt(0) !== '@' && n.assigneeUserId !== as) return false;
+      if (st && n.status !== st) return false;
+      if (h && r.calc.health !== h) return false;
+      if (due) {
+        if (due === 'no_date') { if (n.endDate) return false; }
+        else if (U.dueGroup(n, r.calc) !== due) return false;
+      }
+      return true;
+    });
+
+    document.getElementById('count').textContent = rows.length + ' 件';
+    document.getElementById('result').innerHTML = rows.length
+      ? '<table class="tbl fixed">' + COLS + '<thead><tr><th>タスク</th><th class="col-hide">プロジェクト</th>' +
+        '<th>状態</th><th class="col-hide">進捗</th><th class="col-hide">期限</th><th>担当</th>' +
+        '</tr></thead><tbody>' + rows.map(function (r) {
+          var n = r.node;
+          return '<tr>' +
+            '<td>' + U.taskCell(n, { parent: true }) + '</td>' +
+            '<td class="col-hide small"><a class="row-link" href="project.html?id=' + r.project.projectId + '">' +
+              U.esc(r.project.name) + '</a></td>' +
+            '<td>' + U.healthBadge(r.calc.health) + '</td>' +
+            '<td class="col-hide" style="min-width:130px">' + U.progressBar(r.calc) + '</td>' +
+            '<td class="col-hide small">' + U.dueText(r.calc) + '</td>' +
+            '<td class="small">' + U.assignee(n.assigneeUserId) + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<div class="empty">条件に合うタスクがありません</div>';
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

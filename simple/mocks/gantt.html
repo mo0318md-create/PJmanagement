@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ガント｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb"></div>
+      <div class="page-head">
+        <div><h1 id="p-name">—</h1><div class="sub">期間を横棒で並べます。バーの濃い部分が進んだぶんです</div></div>
+        <span class="spacer"></span>
+        <div class="filters">
+          <label class="small muted" for="f-scale">目盛り</label>
+            <select class="inline" id="f-scale" aria-label="日付の目盛り"><option value="week">週</option><option value="month">月</option></select>
+            <label class="small muted"><input type="checkbox" id="f-subs" checked> 子タスクも表示</label>
+          <label class="small muted"><input type="checkbox" id="f-done" checked> 完了も表示</label>
+        </div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+
+      <div class="card">
+        <div class="card-head"><h2>ガント</h2><span class="tag" id="count">—</span><span class="spacer"></span><a class="btn sm" id="btn-add" href="task-edit.html">＋ タスクを追加</a></div>
+        <div class="card-body tight" id="gantt"></div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none">
+          <div id="legend"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-6（ガント）</li>
+          <li>日付軸は<strong>月の帯＋週（月曜）の目盛り</strong>です。表示期間が4か月を超えると月の目盛りに切り替わります。</li>
+          <li>各行は1本のバーです。完全版にあった予定／実績の2段表示は簡易版では持ちません。</li>
+          <li>プロジェクトの行は出しません（タスクの期間の合計として見えるため）。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script src="assets/gantt.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+
+  var project = U.currentProject();
+  U.projectTabs(project, 'gantt');
+  document.getElementById('p-name').textContent = project.name;
+  document.getElementById('legend').innerHTML = U.ganttLegend();
+  document.getElementById('btn-add').href = 'task-edit.html?project=' + project.projectId;
+
+  ['f-scale', 'f-subs', 'f-done'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+
+  function render() {
+    var showSubs = document.getElementById('f-subs').checked;
+    var showDone = document.getElementById('f-done').checked;
+    var tree = H.evaluateTree(project, D.itemsOf(project.projectId), D.ctx());
+
+    var rows = [];
+    tree.children.forEach(function (t) {
+      if (showDone || t.node.status !== 'done') {
+        rows.push(toRow(t, 1));
+      }
+      if (showSubs) {
+        t.children.forEach(function (s) {
+          if (showDone || s.node.status !== 'done') rows.push(toRow(s, 2));
+        });
+      }
+    });
+
+    document.getElementById('count').textContent = rows.length + ' 件';
+    document.getElementById('gantt').innerHTML = U.ganttHtml(rows, {
+      today: D.today,
+      scale: document.getElementById('f-scale').value,
+      labelHead: 'タスク（期間）',
+      emptyText: '期間が入ったタスクがありません'
+    });
+  }
+
+  function toRow(n, level) {
+    return {
+      name: n.node.name,
+      itemType: n.node.itemType,
+      itemKey: n.node.itemKey,
+      level: level,
+      startDate: n.node.startDate,
+      endDate: n.node.endDate,
+      calc: n.calc,
+      href: 'task-edit.html?id=' + n.node.itemId,
+      tag: D.userName(n.node.assigneeUserId)
+    };
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

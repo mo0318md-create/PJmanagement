@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト詳細｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .bl-form { margin: 0 14px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+  .bl-form .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+  .bl-form .items { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 10px 20px; }
+  .bl-hist { display: grid; grid-template-columns: 64px 110px 90px 1fr; gap: 4px 12px; padding: 5px 0; border-top: 1px solid var(--border); }
+  .bl-hist:first-child { border-top: none; }
+  @media (max-width: 700px) { .bl-hist { grid-template-columns: 52px minmax(0, 1fr); } .bl-hist > :nth-child(n+3) { grid-column: 2; } }
+  .bl-diff-late { color: var(--h-delayed); font-weight: 700; }
+  .bl-diff-early { color: var(--h-on-track); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="breadcrumb">
+        <a href="dashboard-manager.html">プロジェクト一覧</a> ／ <span id="bc-name">—</span>
+      </div>
+
+      <div class="page-head">
+        <div style="min-width:0">
+          <h1 id="p-name">—</h1>
+          <div class="sub" id="p-desc"></div>
+        </div>
+        <span class="spacer"></span>
+        <div class="btn-row">
+          <!-- 判定モードの変更はプロジェクト設定（⑧）だけで行う。ここは表示と行き先 -->
+          <a class="chip" id="p-mode" href="project-settings.html" title="プロジェクト設定で変更">判定モード：—</a>
+        </div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+
+
+      <div class="callout small" id="mode-desc" style="margin-bottom:16px"></div>
+
+      <!-- ===== サマリ ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>概要</h2>
+          <span id="p-health"></span>
+          <span class="spacer"></span>
+          <div id="p-prog" style="min-width:220px"></div>
+        </div>
+        <div class="card-body">
+          <div class="kv" id="p-kv"></div>
+          <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+          <h3 style="margin-bottom:8px">プロジェクト設定項目<span class="tag" style="margin-left:8px" id="p-tplname"></span></h3>
+          <div class="kv" id="p-custom"></div>
+        </div>
+      </div>
+
+      <!-- ===== 当初計画 ===== -->
+      <div class="card" id="bl-card">
+        <div class="card-head">
+          <h2>当初計画</h2>
+          <span id="bl-status"></span>
+          <span class="spacer"></span>
+          <div class="filters" id="bl-controls"></div>
+        </div>
+        <div id="bl-form"></div>
+        <div class="card-body tight" id="bl-body"></div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none;display:block">
+          <h3 style="margin:0 0 6px">確定・引き直しの履歴</h3>
+          <div id="bl-history" class="small"></div>
+        </div>
+      </div>
+
+      <!-- ===== タスクツリー ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>タスク構成</h2>
+          <span class="chip" id="p-counts">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label class="check-line small"><input type="checkbox" id="f-delayed"> 遅延のみ表示</label>
+            <button class="btn sm" id="btn-collapse">すべて折りたたむ</button>
+          </div>
+        </div>
+        <div class="card-body tight">
+          <div class="tree-row head">
+            <div>タスク / 子タスク</div>
+            <div>健全性</div>
+            <div>進捗</div>
+            <div class="col-hide">期間</div>
+            <div class="col-hide">期限</div>
+          </div>
+          <div id="tree"></div>
+        </div>
+        <div class="card-head" style="border-bottom:none;border-top:1px solid var(--border)">
+          <div id="legend"></div>
+        </div>
+      </div>
+
+      <!-- ===== ガント ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>期間の重なり（簡易ガント）</h2>
+          <span class="spacer"></span>
+          <span class="small muted">各行の上段が予定、下段が実績。日付は左の2行に出ています</span>
+        </div>
+        <div class="card-body tight">
+          <div id="gantt"></div>
+        </div>
+        <div class="card-head" style="border-bottom:none;border-top:1px solid var(--border)">
+          <div id="gantt-legend-area"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-5（ツリー）／F-3-6（ガント・今日線）／F-3-7（階層別消化状況）／F-3-8（カスタム項目）／F-3-9（遅延のみ表示）／F-2-4（判定モード切替）</li>
+          <li>右上の判定モードを切り替えると、同じデータでも健全性の判定結果が変わります（auto / manual / deadline）。実装では変更がプロジェクトに保存されます。</li>
+          <li>親の健全性は「親自身の期間」で判定し、子の遅延は伝播させません。代わりに配下の遅延件数をチップで表示しています。</li>
+          <li>ガントは各行2段で、上段＝予定（枠線）、下段＝実績（塗り）。左に「予定 9/2〜9/21」「実績 9/2〜 進行中 超過+5日」のように実日付と予実差を出します。実績の開始日・終了日はステータス変更時に自動で記録します（F-2-17）。</li>
+          <li>当初計画（F-2-13, F-2-18〜20）：作成直後は「計画中」で当初計画を持ちません。日程を詰め終えたら管理者が「計画を確定」を押し、その時点の日付を第1版として保存します。確定後の日付変更は当初比に出ます。</li>
+          <li>入力ミスや正式な計画変更は「当初計画を引き直す」で新しい版を作ります（全体、または選んだタスクだけ）。理由は必須で、履歴に残ります。比較する版を選ぶと、当初比・当初日程での健全性・ガントの灰色線がその版で計算し直されます。確定後に追加したタスクは、追加した時点の日付が当初計画になります（遅れではなく「追加」）。</li>
+          <li>ガントの目盛りは月の帯＋週（月曜）です。表示期間が4か月を超えると自動で月の目盛りに切り替わります。各行には開始〜終了の実日付と日数を出し、今日には日付つきのラベルを付けています。</li>
+          <li>未確定: 子タスクが親の期間をはみ出したときの警告表示（F-2-10）は未実装。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script src="assets/gantt.js"></script>
+<script src="assets/project-tabs.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  var me = UI.renderShell({ active: 'dashboard', view: 'project' });
+
+  var pid = U.qs('id', 'p1');
+  var project = D.projectById(pid) || D.projects[0];
+  var mode = D.modeOf(project);
+  U.projectTabs(project, 'overview');
+  var compareVersion = null;   // 比較する当初計画の版（null＝最新）
+  var formOpen = false;
+  var collapsed = {};   // itemId -> true
+  var tree;
+
+  // ---- 判定モード（表示だけ。変更はプロジェクト設定） ----
+  var modeLink = document.getElementById('p-mode');
+  modeLink.textContent = '判定モード：' + H.MODE_LABEL[mode] + ' ›';
+  modeLink.href = 'project-settings.html?id=' + project.projectId;
+
+  // ------------------------------------------------------------------
+  function renderSummary() {
+    var c = tree.calc;
+    document.getElementById('bc-name').textContent = project.name;
+    document.getElementById('p-name').textContent = project.name;
+    document.getElementById('p-desc').textContent = project.description || '';
+    document.getElementById('p-health').innerHTML = U.healthBadge(c.health) +
+      (c.delayDays > 0 ? ' <span class="delay-note">' + '超過+' + c.delayDays + '日</span>' : '');
+    document.getElementById('p-prog').innerHTML = U.progressBar(c) +
+      '<div class="small faint num" style="text-align:right">予定 ' + H.pct(c.plannedRate) +
+      (c.delta !== null ? '（差 ' + (c.delta >= 0 ? '+' : '') + Math.round(c.delta * 100) + 'pt）' : '') + '</div>';
+    document.getElementById('mode-desc').textContent = H.MODE_DESC[mode];
+
+    document.getElementById('p-kv').innerHTML = [
+      ['期間', U.periodText(project.startDate, project.endDate)],
+      ['期限まで', c.remainingDays === null ? '—' :
+        (c.remainingDays < 0 ? '<span class="delay-note">' + '超過+' + (-c.remainingDays) + '日</span>'
+          : '<span class="num">あと ' + c.remainingDays + ' 日</span>')],
+      ['当初比', !c.hasBaseline ? (project.planStatus === 'fixed' ? '<span class="faint">当初計画なし</span>' : '<span class="faint">計画中（未確定のため当初比なし）</span>') :
+        (c.slipDays > 0
+          ? '<span class="delay-note">+' + c.slipDays + '日</span> <span class="small muted">（当初 ' + H.formatDate(tree.baselineEndDate) + '）</span>'
+          : '<span class="muted">当初計画どおり</span>')],
+      ['当初日程での健全性', c.baselineHealth ? U.healthBadge(c.baselineHealth) : '—'],
+      ['オーナー', U.esc(D.userName(project.ownerUserId))],
+      ['ステータス', U.statusChip(tree.status)],
+      ['タスク消化', '<span class="num">' + c.counts.task.done + ' / ' + c.counts.task.total + '</span>'],
+      ['子タスク消化', '<span class="num">' + c.counts.subtask.done + ' / ' + c.counts.subtask.total + '</span>'],
+      ['作業の重さ', '<span class="num">' + U.days(c.effortDays) + '</span> <span class="small muted">（' +
+        (c.rollupWeight === "effort" ? "進捗の重みにも使用中" : "進捗の重みは期間日数") + '）</span>'],
+      ['配下の遅延', c.delayedCount > 0
+        ? '<span class="delay-note">' + c.delayedCount + ' 件</span>' : '<span class="muted">なし</span>'],
+      ['配下の後ろ倒し', c.slippedCount > 0
+        ? '<span class="delay-note">' + c.slippedCount + ' 件</span>' : '<span class="muted">なし</span>'],
+      ['判定モード', H.MODE_LABEL[mode] + (project.progressMode ? '' : '<span class="tag" style="margin-left:6px">既定値を継承</span>')]
+    ].map(function (r) {
+      return '<div><div class="k">' + r[0] + '</div><div class="v">' + r[1] + '</div></div>';
+    }).join('');
+
+    // カスタム項目（テンプレート定義に沿って表示 / F-3-8）
+    document.getElementById('p-tplname').textContent = project.templateName || '';
+    var tpl = project.templateId ? D.templateById(project.templateId) : null;
+    var box = document.getElementById('p-custom');
+    if (!tpl || !tpl.fields.length) {
+      box.innerHTML = '<div class="muted small">このプロジェクトにはカスタム設定項目がありません（テンプレート未使用）。</div>';
+      return;
+    }
+    box.innerHTML = tpl.fields.map(function (f) {
+      var raw = project.customFields ? project.customFields[f.fieldKey] : undefined;
+      var v;
+      if (raw === undefined || raw === null || raw === '') v = '<span class="faint">未入力</span>';
+      else if (f.type === 'checkbox') v = raw ? 'はい' : 'いいえ';
+      else if (f.type === 'number') v = '<span class="num">' + Number(raw).toLocaleString('ja-JP') + '</span>';
+      else if (f.type === 'date') v = '<span class="num">' + U.esc(H.formatDate(raw, true)) + '</span>';
+      else v = U.esc(raw);
+      return '<div><div class="k">' + U.esc(f.label) + '</div><div class="v">' + v + '</div></div>';
+    }).join('');
+  }
+
+  // ------------------------------------------------------------------
+  function rowHtml(node) {
+    var c = node.calc;
+    var hasChildren = (node.children || []).length > 0;
+    var isCollapsed = !!collapsed[node.itemId];
+    var assignee = node.assigneeUserId
+      ? '<span class="tag">' + U.esc(D.userName(node.assigneeUserId)) + '</span>'
+      : '<span class="tag faint">未アサイン</span>';
+    var childDelay = c.delayedCount > 0
+      ? '<span class="badge delayed" title="配下の遅延件数">' + c.delayedCount + '</span>' : '';
+
+    return '<div class="tree-row lv' + node.level + (c.health === 'delayed' ? ' is-delayed' : '') + '">' +
+      '<div class="name">' +
+        '<button class="toggle' + (hasChildren ? '' : ' leaf') + '" data-id="' + node.itemId + '"' +
+          ' aria-label="展開／折りたたみ">' + (isCollapsed ? '▶' : '▼') + '</button>' +
+        '<a class="txt row-link" href="task-edit.html?id=' + node.itemId + '">' + U.esc(node.name) + '</a>' +
+        assignee + U.statusChip(node.status) + childDelay + U.slipChip(c) + U.effortChip(c) +
+      '</div>' +
+      '<div>' + U.healthBadge(c.health) + '</div>' +
+      '<div>' + U.progressBar(c) + '</div>' +
+      '<div class="col-hide">' + U.periodText(node.startDate, node.endDate) + '</div>' +
+      '<div class="col-hide small">' + U.dueText(c, node.endDate) + '</div>' +
+      '</div>';
+  }
+
+  function renderTree() {
+    var onlyDelayed = document.getElementById('f-delayed').checked;
+    var html = '';
+
+    tree.children.forEach(function (task) {
+      var subs = (task.children || []).filter(function (s) {
+        return !onlyDelayed || s.calc.health === 'delayed';
+      });
+      var taskMatches = !onlyDelayed || task.calc.health === 'delayed' || subs.length > 0;
+      if (!taskMatches) return;
+
+      html += rowHtml(task);
+      if (!collapsed[task.itemId]) {
+        subs.forEach(function (s) { html += rowHtml(s); });
+      }
+    });
+
+    var el = document.getElementById('tree');
+    el.innerHTML = html || '<div class="empty">該当するタスクがありません</div>';
+
+    el.querySelectorAll('.toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        collapsed[id] = !collapsed[id];
+        renderTree();
+      });
+    });
+
+    var c = tree.calc;
+    document.getElementById('p-counts').textContent =
+      'タスク ' + c.counts.task.done + '/' + c.counts.task.total +
+      '・子タスク ' + c.counts.subtask.done + '/' + c.counts.subtask.total;
+  }
+
+  // ------------------------------------------------------------------
+  function renderGantt() {
+    // プロジェクト自身の行を先頭に置き、その下にタスク・子タスクを並べる
+    var rows = [{
+      name: project.name, level: 1, startDate: project.startDate, endDate: project.endDate,
+      calc: tree.calc, baselineStartDate: tree.baselineStartDate, baselineEndDate: tree.baselineEndDate,
+      tag: 'プロジェクト全体'
+    }].concat(H.flatten(tree).map(function (n) {
+      return {
+        name: n.name, level: n.level + 1 > 2 ? 2 : n.level, startDate: n.startDate, endDate: n.endDate,
+        calc: n.calc, baselineStartDate: n.baselineStartDate, baselineEndDate: n.baselineEndDate,
+        href: 'task-edit.html?id=' + n.itemId,
+        tag: n.assigneeUserId ? D.userName(n.assigneeUserId) : '未アサイン'
+      };
+    }));
+
+    document.getElementById('gantt-legend-area').innerHTML = U.ganttLegend();
+    document.getElementById('gantt').innerHTML = U.ganttHtml(rows, {
+      today: D.today,
+      labelHead: 'タスク（期間）',
+      emptyText: '期間が設定されたタスクがありません',
+      milestones: D.milestonesOf(project.projectId)
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
+  // 当初計画：比較する版を当てはめてツリーを評価する
+  function evalTree() {
+    var list = D.baselinesOf(project.projectId);
+    if (project.planStatus !== 'fixed' || !list.length) return U.projectTree(project, mode);
+    var v = compareVersion || list[list.length - 1].version;
+    var w = D.withBaseline(project, v);
+    return H.evaluateTree(H.buildTree(w.project, w.items), {
+      mode: mode, today: D.today, thresholds: D.thresholds(),
+      rollupWeight: D.settings.rollupWeight, effort: D.effortSettings()
+    });
+  }
+
+  function diffText(n) {
+    if (n === null || n === undefined) return '<span class="faint">—</span>';
+    if (n > 0) return '<span class="bl-diff-late">+' + n + '日</span>';
+    if (n < 0) return '<span class="bl-diff-early">' + n + '日</span>';
+    return '<span class="muted">±0</span>';
+  }
+
+  function renderBaseline() {
+    var isAdmin = me && me.role === 'admin';
+    var list = D.baselinesOf(project.projectId);
+    var st = document.getElementById('bl-status');
+    var ctl = document.getElementById('bl-controls');
+    var body = document.getElementById('bl-body');
+    var hist = document.getElementById('bl-history');
+    var form = document.getElementById('bl-form');
+
+    if (project.planStatus !== 'fixed' || !list.length) {
+      st.innerHTML = '<span class="badge not_started">計画中</span>';
+      ctl.innerHTML = isAdmin
+        ? '<button class="btn primary sm" id="bl-fix">計画を確定して当初計画を保存</button>'
+        : '<span class="small muted">確定は管理者が行います</span>';
+      body.innerHTML = '<div class="empty">まだ当初計画はありません。日程を詰めている間は、日付を何度直しても当初比には出ません。<br>' +
+        '固まったら「計画を確定」を押すと、その時点の日付が第1版として保存されます。</div>';
+      hist.innerHTML = '<span class="faint">まだありません</span>';
+      form.innerHTML = '';
+      var fx = document.getElementById('bl-fix');
+      if (fx) fx.addEventListener('click', function () {
+        D.fixPlan(project.projectId, me.userId, '計画を確定');
+        compareVersion = null;
+        renderAll();
+      });
+      return;
+    }
+
+    var latest = list[list.length - 1];
+    var cur = compareVersion || latest.version;
+    var shown = list.filter(function (b) { return b.version === cur; })[0];
+    st.innerHTML = '<span class="badge on_track">確定済み</span> <span class="small muted">最新 第' + latest.version + '版（' +
+      H.formatDate(latest.setAt) + '）</span>';
+
+    ctl.innerHTML = '<label for="bl-ver">比較する版</label><select class="inline" id="bl-ver">' +
+      list.slice().reverse().map(function (b) {
+        return '<option value="' + b.version + '"' + (b.version === cur ? ' selected' : '') + '>第' + b.version + '版（' +
+          H.formatDate(b.setAt) + (b.kind === 'fix' ? ' 確定' : ' 引き直し') + '）</option>';
+      }).join('') + '</select>' +
+      (isAdmin ? ' <button class="btn sm" id="bl-open">当初計画を引き直す</button>'
+               : ' <span class="small muted">引き直しは管理者のみ</span>');
+
+    // 引き直しフォーム
+    var nodes = H.flatten(tree);
+    form.innerHTML = !formOpen ? '' :
+      '<div class="bl-form">' +
+        '<div class="row"><strong>対象</strong>' +
+          '<label class="check-line small"><input type="radio" name="bl-scope" value="all" checked> プロジェクト全体</label>' +
+          '<label class="check-line small"><input type="radio" name="bl-scope" value="items"> 選んだタスクだけ（入力ミスの訂正など）</label>' +
+        '</div>' +
+        '<div class="items" id="bl-items" style="display:none">' + nodes.map(function (n) {
+          return '<label class="check-line small"><input type="checkbox" value="' + n.itemId + '"> ' + U.esc(n.name) + '</label>';
+        }).join('') + '</div>' +
+        '<div class="row"><strong>理由</strong>' +
+          '<select class="inline" id="bl-reason-kind"><option>入力ミスの訂正</option><option>仕様・範囲の変更</option><option>顧客都合の日程変更</option><option>その他</option></select>' +
+          '<input type="text" id="bl-reason" placeholder="具体的な理由（必須）" style="flex:1;min-width:240px">' +
+        '</div>' +
+        '<div class="row" style="margin:0"><span class="small muted">いまの予定日が新しい当初計画になります。前の版は消えず、あとから比較できます。</span>' +
+          '<span class="spacer"></span><button class="btn sm" id="bl-cancel">キャンセル</button> <button class="btn primary sm" id="bl-save">第' + (latest.version + 1) + '版として保存</button></div>' +
+      '</div>';
+
+    // 比較表：当初（選んだ版） → いまの予定 → 実績
+    var rows = [{ n: tree, name: 'プロジェクト全体', level: 0 }].concat(nodes.map(function (n) { return { n: n, name: n.name, level: n.level }; }));
+    body.innerHTML = '<table class="tbl"><thead><tr><th>タスク</th><th>当初（第' + cur + '版）</th><th>いまの予定</th><th>実績</th>' +
+      '<th class="c">当初比（終了）</th><th>備考</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var n = r.n, c = n.calc;
+        var note = [];
+        if (n.addedAfterFix) note.push('確定後に追加（' + H.formatDate(n.addedAfterFix) + '）');
+        list.forEach(function (b) {
+          if (b.version <= cur && b.scope === 'items' && b.itemIds.indexOf(n.itemId) >= 0) note.push('第' + b.version + '版で引き直し');
+        });
+        var actual = c.actualState === 'done' ? U.periodText(c.actualStart, c.actualEnd)
+          : c.actualState === 'running' ? '<span class="num small">' + H.formatDate(c.actualStart) + ' 〜 進行中</span>'
+          : '<span class="faint small">未着手</span>';
+        return '<tr' + (r.level === 0 ? ' style="font-weight:700"' : '') + '>' +
+          '<td style="padding-left:' + (8 + (r.level > 0 ? (r.level - 1) * 16 : 0)) + 'px">' + U.esc(r.name) + '</td>' +
+          '<td>' + (n.baselineStartDate ? U.periodText(n.baselineStartDate, n.baselineEndDate) : '<span class="faint">—</span>') + '</td>' +
+          '<td>' + U.periodText(n.startDate, n.endDate) + '</td>' +
+          '<td>' + actual + '</td>' +
+          '<td class="c num">' + diffText(c.slipDays) + '</td>' +
+          '<td class="small muted">' + U.esc(note.join('・')) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+
+    // 履歴
+    hist.innerHTML = list.slice().reverse().map(function (b) {
+      var scope = b.scope === 'all' ? 'プロジェクト全体'
+        : '選んだタスク：' + b.itemIds.map(function (id) { var x = D.itemById(id); return x ? x.name : id; }).join('、');
+      return '<div class="bl-hist"><strong>第' + b.version + '版</strong><span class="num">' + U.esc(H.formatDate(b.setAt)) + '</span>' +
+        '<span>' + U.esc(D.userName(b.setBy)) + '</span>' +
+        '<span>' + (b.kind === 'fix' ? '<span class="badge on_track">確定</span> ' : '<span class="badge at_risk">引き直し</span> ') +
+        U.esc(scope) + ' ─ ' + U.esc(b.reason) + '</span></div>';
+    }).join('');
+
+    // イベント
+    document.getElementById('bl-ver').addEventListener('change', function () { compareVersion = +this.value; renderAll(); });
+    var op = document.getElementById('bl-open');
+    if (op) op.addEventListener('click', function () { formOpen = !formOpen; renderBaseline(); });
+    if (formOpen) {
+      document.querySelectorAll('input[name=bl-scope]').forEach(function (r) {
+        r.addEventListener('change', function () {
+          document.getElementById('bl-items').style.display = this.value === 'items' && this.checked ? 'flex' : 'none';
+        });
+      });
+      document.getElementById('bl-cancel').addEventListener('click', function () { formOpen = false; renderBaseline(); });
+      document.getElementById('bl-save').addEventListener('click', function () {
+        var text = document.getElementById('bl-reason').value.trim();
+        if (!text) { alert('理由を入力してください（履歴に残ります）'); return; }
+        var scope = document.querySelector('input[name=bl-scope]:checked').value;
+        var ids = scope === 'items'
+          ? [].map.call(document.querySelectorAll('#bl-items input:checked'), function (x) { return x.value; }) : null;
+        if (scope === 'items' && !ids.length) { alert('引き直すタスクを選んでください'); return; }
+        D.rebase(project.projectId, me.userId, document.getElementById('bl-reason-kind').value + '：' + text, ids);
+        formOpen = false;
+        compareVersion = null;
+        renderAll();
+      });
+    }
+  }
+
+  function renderAll() {
+    tree = evalTree();
+    renderSummary();
+    renderTree();
+    renderGantt();
+    renderBaseline();
+  }
+
+  document.getElementById('f-delayed').addEventListener('change', renderTree);
+  document.getElementById('btn-collapse').addEventListener('click', function () {
+    var anyOpen = tree.children.some(function (t) { return !collapsed[t.itemId]; });
+    tree.children.forEach(function (t) { collapsed[t.itemId] = anyOpen; });
+    this.textContent = anyOpen ? 'すべて展開する' : 'すべて折りたたむ';
+    renderTree();
+  });
+
+  document.getElementById('legend').innerHTML = U.progressLegend();
+  renderAll();
+})();
+</script>
+</body>
+</html>

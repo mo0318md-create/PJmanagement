@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>タスクの編集｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .row2 { grid-template-columns: 1fr; } }
+  .preview { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; font-size: 15px; align-items: center; }
+  .preview dt { color: var(--text-muted); }
+  .preview dd { margin: 0; }
+  .rate-row { display: flex; align-items: center; gap: 10px; }
+  .rate-row input[type=range] { flex: 1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb"></div>
+      <div class="page-head">
+        <div><h1>タスクの編集</h1><div class="sub" id="sub">—</div></div>
+        <span class="spacer"></span>
+        <div class="btn-row">
+          <button class="btn" id="btn-del">削除</button>
+          <button class="btn primary" id="btn-save">保存</button>
+        </div>
+      </div>
+
+      <div class="callout small" style="margin-bottom:16px">
+        実装ではモーダル（小窓）で開きます。モックでは中身がわかるように1画面にしています。
+      </div>
+
+      <div class="row2">
+        <div class="card">
+          <div class="card-head"><h2>内容</h2></div>
+          <div class="card-body">
+            <div class="field"><label for="f-name">タスク名</label><input id="f-name" type="text"></div>
+            <div class="field"><label for="f-desc">説明</label><textarea id="f-desc" rows="3"></textarea></div>
+            <div class="row2">
+              <div class="field"><label for="f-type">種別</label><select id="f-type"></select></div>
+              <div class="field"><label for="f-assignee">担当者</label><select id="f-assignee"></select></div>
+            </div>
+            <div class="row2">
+              <div class="field"><label for="f-start">開始日</label><input id="f-start" type="date"></div>
+              <div class="field"><label for="f-end">終了日</label><input id="f-end" type="date"></div>
+            </div>
+            <div class="row2">
+              <div class="field"><label for="f-status">ステータス</label><select id="f-status"></select>
+                <div class="help">完了にすると進捗率は自動で100%になります</div></div>
+              <div class="field"><label for="f-rate">進捗率</label>
+                <div class="rate-row">
+                  <input id="f-rate" type="range" min="0" max="100" step="5">
+                  <input id="f-rate-n" type="number" min="0" max="100" step="5" style="width:74px" aria-label="進捗率（数値）">
+                  <span>%</span>
+                </div>
+                <div class="help" id="rate-help"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>いまの状態</h2><span id="pv-health"></span></div>
+          <div class="card-body">
+            <div id="pv-bar" style="margin-bottom:14px"></div>
+            <dl class="preview" id="pv"></dl>
+            <div class="callout small" style="margin-top:14px" id="pv-why"></div>
+            <p class="small muted" style="margin:12px 0 0">
+              進捗率と予定進捗率は<strong>状態の判定には使いません</strong>。進み具合を人が見るための数字です。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-4（タスクの編集）／F-2-1（期間）／F-2-21（進捗率は手入力）</li>
+          <li>値を変えると、右の状態がその場で変わります。そうなっている理由も1行で出しています。</li>
+          <li>状態は<strong>終了日とステータスだけ</strong>で決まります。進捗率を下げても「遅延」にはなりません。そのため「判定のプレビュー」という見せ方はやめ、いまの状態を出すだけにしています。</li>
+          <li><strong>子タスクを持つタスクは進捗率を入力できません</strong>（子の平均になるため）。その場合は入力欄を止めます。</li>
+          <li>担当者を変えると、新旧の担当者にお知らせ（F-5-9）が出ます。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+
+  var q = new URLSearchParams(location.search);
+  var item, project, parentTask = null, isNew = false;
+
+  var editing = q.get('id') ? D.itemById(q.get('id')) : null;
+  if (editing) {
+    // ---- 既存タスクの編集 ----
+    item = editing;
+    project = D.projectById(item.projectId);
+    parentTask = item.parentItemId ? D.itemById(item.parentItemId) : null;
+  } else {
+    // ---- 新規作成（?project=… でタスク、?parent=… で子タスク） ----
+    isNew = true;
+    parentTask = q.get('parent') ? D.itemById(q.get('parent')) : null;
+    project = parentTask ? D.projectById(parentTask.projectId)
+      : (D.projectById(q.get('project')) || D.projects[0]);
+    item = {
+      itemId: '(new)', projectId: project.projectId, itemKey: '(自動)',
+      level: parentTask ? 2 : 1,
+      parentItemId: parentTask ? parentTask.itemId : null,
+      sortOrder: 9999, name: '', description: '', itemType: 'work',
+      assigneeUserId: null, status: 'not_started',
+      startDate: parentTask ? parentTask.startDate : project.startDate,
+      endDate: parentTask ? parentTask.endDate : project.endDate,
+      progressRate: 0
+    };
+  }
+
+  var kids = D.itemsOf(project.projectId).filter(function (x) { return x.parentItemId === item.itemId; });
+  var hasKids = kids.length > 0;
+  var levelLabel = item.level === 1 ? 'タスク' : '子タスク';
+
+  document.querySelector('h1').textContent = isNew ? levelLabel + 'を追加' : 'タスクの編集';
+  document.title = (isNew ? levelLabel + 'の追加' : 'タスクの編集') + '｜PJ管理（簡易版）';
+  if (isNew) document.getElementById('btn-del').style.display = 'none';
+
+  document.getElementById('crumb').innerHTML =
+    '<a href="projects.html">プロジェクト一覧</a> ／ <a href="project.html?id=' + project.projectId + '">' +
+    U.esc(project.name) + '</a> ／ ' + (isNew ? levelLabel + 'を追加' : U.esc(item.itemKey));
+  document.getElementById('sub').innerHTML = isNew
+    ? (parentTask
+        ? '「' + U.esc(parentTask.name) + '」の下に子タスクを作ります。期間は親と同じにしてあります'
+        : U.esc(project.name) + ' の直下にタスクを作ります。期間はプロジェクトと同じにしてあります')
+    : U.esc(item.itemKey) + ' ・ ' + levelLabel +
+      (parentTask ? '（親：' + U.esc(parentTask.name) + '）' : '') +
+      (hasKids ? '（子タスク ' + kids.length + ' 件）' : '');
+
+  // ---- 入力欄 ----
+  function fill(id, list, cur) {
+    document.getElementById(id).innerHTML = list.map(function (o) {
+      return '<option value="' + o[0] + '"' + (o[0] === cur ? ' selected' : '') + '>' + U.esc(o[1]) + '</option>';
+    }).join('');
+  }
+  document.getElementById('f-name').value = item.name;
+  document.getElementById('f-desc').value = item.description || '';
+  fill('f-type', ['work', 'bug', 'req'].map(function (t) { return [t, H.TYPE_LABEL[t]]; }), item.itemType);
+  fill('f-assignee', [['', '未アサイン']].concat(D.users.map(function (u) { return [u.userId, u.name]; })),
+    item.assigneeUserId || '');
+  fill('f-status', H.STATUS_ORDER.map(function (s) { return [s, H.STATUS_LABEL[s]]; }), item.status);
+  document.getElementById('f-start').value = item.startDate || '';
+  document.getElementById('f-end').value = item.endDate || '';
+
+  var rate = document.getElementById('f-rate'), rateN = document.getElementById('f-rate-n');
+  if (hasKids) {
+    rate.disabled = true; rateN.disabled = true;
+    document.getElementById('rate-help').innerHTML =
+      '<strong>子タスクを持つので入力できません。</strong>子 ' + kids.length + ' 件の平均が進捗率になります。';
+  } else {
+    document.getElementById('rate-help').textContent = '担当者が入れる値です。未入力は0%として扱います。';
+  }
+
+  ['f-name', 'f-desc', 'f-type', 'f-assignee', 'f-status', 'f-start', 'f-end'].forEach(function (id) {
+    document.getElementById(id).addEventListener('input', apply);
+    document.getElementById(id).addEventListener('change', apply);
+  });
+  rate.addEventListener('input', function () { rateN.value = rate.value; apply(); });
+  rateN.addEventListener('input', function () { rate.value = rateN.value; apply(); });
+
+  // ---- 反映とプレビュー ----
+  function apply() {
+    item.name = document.getElementById('f-name').value;
+    item.description = document.getElementById('f-desc').value;
+    item.itemType = document.getElementById('f-type').value;
+    item.assigneeUserId = document.getElementById('f-assignee').value || null;
+    item.startDate = document.getElementById('f-start').value || null;
+    item.endDate = document.getElementById('f-end').value || null;
+
+    var st = document.getElementById('f-status').value;
+    if (st !== item.status) {
+      item.status = st;
+      if (st === 'done' && !hasKids) { rate.value = 100; rateN.value = 100; }
+    }
+    if (!hasKids) item.progressRate = Number(rateN.value);
+    preview();
+  }
+
+  function preview() {
+    var ctx = D.ctx();
+    var kidCalcs = kids.map(function (k) { return { node: k, calc: H.evaluate(k, [], ctx) }; });
+    var calc = H.evaluate(item, kidCalcs, ctx);
+
+    document.getElementById('pv-health').innerHTML = U.healthBadge(calc.health);
+    document.getElementById('pv-bar').innerHTML = U.progressBar(calc);
+    document.getElementById('pv').innerHTML = [
+      ['進捗率', '<span class="num">' + H.pct(calc.actualRate) + '</span>' +
+        (calc.hasChildren ? ' <span class="faint small">（子 ' + kids.length + ' 件の平均）</span>' : '')],
+      ['予定進捗率', '<span class="num faint">' + H.pct(calc.plannedRate) + '</span>' +
+        '<span class="faint small">（参考。今日の時点で本来どこまで進んでいるはずか）</span>'],
+      ['終了日', calc.remainingDays === null ? '<span class="faint">未設定</span>'
+        : '<span class="num">' + H.formatDate(item.endDate) + '</span> ・ ' + U.dueText(calc)]
+    ].map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; }).join('');
+
+    document.getElementById('pv-why').innerHTML = why(calc);
+  }
+
+  /** 状態がそうなっている理由。終了日とステータスだけで決まる */
+  function why(calc) {
+    if (item.status === 'done') return '<strong>完了</strong>：ステータスが完了だからです。';
+    if (item.endDate && D.today > item.endDate)
+      return '<strong>遅延</strong>：終了日（' + H.formatDate(item.endDate) + '）を過ぎて、まだ完了していないからです。';
+    if (!item.startDate || !item.endDate) return '<strong>期間未設定</strong>：開始日か終了日が入っていないからです。';
+    if (D.today < item.startDate) return '<strong>開始前</strong>：開始日（' + H.formatDate(item.startDate) + '）より前だからです。';
+    return '<strong>対応中</strong>：終了日（' + H.formatDate(item.endDate) + '）をまだ過ぎていないからです。' +
+      '進捗率がいくつでも、終了日を過ぎるまでは「対応中」のままです。';
+  }
+
+  document.getElementById('btn-save').addEventListener('click', function () {
+    if (!item.name.trim()) { alert('タスク名を入れてください'); return; }
+    if (item.startDate && item.endDate && item.startDate > item.endDate) {
+      alert('開始日が終了日より後になっています'); return;
+    }
+    if (isNew) {
+      // モック：その場で一覧に足す（実装では1行ぶんだけスプレッドシートに書き込む）
+      item.itemId = 'new_' + Date.now();
+      item.itemKey = project.key + '-' + (project.nextItemSeq || (D.itemsOf(project.projectId).length + 1));
+      project.nextItemSeq = (project.nextItemSeq || (D.itemsOf(project.projectId).length + 1)) + 1;
+      var siblings = D.itemsOf(project.projectId).filter(function (x) {
+        return x.level === item.level && x.parentItemId === item.parentItemId;
+      });
+      item.sortOrder = siblings.length ? Math.max.apply(null, siblings.map(function (x) { return x.sortOrder; })) + 100 : 100;
+      D.items.push(item);
+      alert(levelLabel + 'を追加しました（モック：再読込で元に戻ります）');
+    } else {
+      alert('保存しました（モック：再読込で元に戻ります）');
+    }
+    location.href = 'project.html?id=' + project.projectId;
+  });
+  document.getElementById('btn-del').addEventListener('click', function () {
+    if (hasKids) { alert('子タスクが ' + kids.length + ' 件あります。先に子タスクを消すか、まとめて消すか選びます（モックでは未実装）'); return; }
+    if (confirm('このタスクを削除しますか？')) location.href = 'project.html?id=' + project.projectId;
+  });
+
+  preview();
+})();
+</script>
+</body>
+</html>

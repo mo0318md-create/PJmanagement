@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト概要｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .kv { display: grid; grid-template-columns: 116px 1fr; gap: 7px 12px; font-size: 15px; }
+  .kv dt { color: var(--text-muted); }
+  .kv dd { margin: 0; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb"></div>
+      <div class="page-head">
+        <div style="min-width:0">
+          <h1 id="p-name">—</h1>
+          <div class="sub" id="p-desc"></div>
+        </div>
+        <span class="spacer"></span>
+        <div class="btn-row">
+          <a class="btn" id="btn-add" href="task-edit.html">＋ タスクを追加</a>
+        </div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+
+      <div class="cols" style="margin-bottom:16px">
+        <div class="card">
+          <div class="card-head"><h2>状況</h2><span id="p-health"></span></div>
+          <div class="card-body">
+            <div id="p-prog" style="margin-bottom:14px"></div>
+            <dl class="kv" id="p-kv"></dl>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>このプロジェクトの設定項目</h2>
+            <span class="spacer"></span>
+            <a class="small" id="lnk-settings" href="project-settings.html">設定を編集</a>
+          </div>
+          <div class="card-body"><dl class="kv" id="p-custom"></dl></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>タスク</h2>
+          <span class="tag" id="t-count">—</span>
+          <span class="spacer"></span>
+          <label class="small muted"><input type="checkbox" id="f-delayed"> 遅延だけ表示</label>
+          <button class="btn sm" id="btn-toggle">すべて折りたたむ</button>
+        </div>
+        <div class="card-body tight" id="tree"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-5（ツリー）／F-3-7（消化状況）／F-3-8（設定項目）／F-3-9（遅延だけ表示）</li>
+          <li>設定項目はテンプレートごとに違います。ここに出る欄は、作成時に選んだテンプレートの定義（F-1-3）をコピーしたものです。</li>
+          <li>親タスクとプロジェクトの進捗率は<strong>子の平均</strong>で自動計算します。手入力できるのは子を持たないタスクだけです。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+
+  var project = U.currentProject();
+  U.projectTabs(project, 'overview');
+  document.getElementById('btn-add').href = 'task-edit.html?project=' + project.projectId;
+  document.getElementById('lnk-settings').href = 'project-settings.html?id=' + project.projectId;
+
+  var tree = H.evaluateTree(project, D.itemsOf(project.projectId), D.ctx());
+  var collapsed = {};
+
+  // ---- 状況 ----
+  var c = tree.calc;
+  document.getElementById('p-name').textContent = project.name;
+  document.getElementById('p-desc').textContent = project.description || '';
+  document.getElementById('p-health').innerHTML = U.healthBadge(c.health) +
+    (c.overDays > 0 ? ' <span class="delay-note">超過+' + c.overDays + '日</span>' : '');
+  // 予定進捗率は参考値。状態の判定には使わないので、差（pt）は出さない
+  document.getElementById('p-prog').innerHTML = U.progressBar(c) +
+    '<div class="small faint" style="text-align:right;margin-top:4px">' +
+    (c.plannedRate === null ? '期間未設定'
+      : '今日の時点の予定 <span class="num">' + H.pct(c.plannedRate) + '</span>（参考）') + '</div>';
+
+  var subTotal = 0, subDone = 0;
+  tree.children.forEach(function (t) { subTotal += t.children.length; subDone += t.calc.doneCount; });
+  document.getElementById('p-kv').innerHTML = [
+    ['期間', U.periodText(project.startDate, project.endDate)],
+    ['期限まで', U.dueText(c)],
+    ['タスク', '<span class="num">' + c.doneCount + ' / ' + c.childCount + ' 完了</span>'],
+    ['子タスク', '<span class="num">' + subDone + ' / ' + subTotal + ' 完了</span>'],
+    ['配下の遅延', c.delayedInside > 0 ? '<span class="delay-note">' + c.delayedInside + ' 件</span>' : '<span class="faint">なし</span>'],
+    ['オーナー', U.avatar(project.ownerUserId) + ' ' + U.esc(D.userName(project.ownerUserId))],
+    ['テンプレート', U.esc(project.templateName || 'テンプレートなし')]
+  ].map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; }).join('');
+
+  // ---- 設定項目 ----
+  var fields = project.templateId ? D.fieldsOf(project.templateId) : [];
+  var cf = project.customFields || {};
+  document.getElementById('p-custom').innerHTML = fields.length
+    ? fields.map(function (f) {
+        var v = cf[f.fieldKey];
+        var text = (v === undefined || v === null || v === '') ? '<span class="faint">未入力</span>'
+          : f.type === 'checkbox' ? (v ? 'はい' : 'いいえ')
+          : f.type === 'number' ? '<span class="num">' + U.esc(String(v)) + '</span>'
+          : f.type === 'date' ? '<span class="num">' + H.formatDateY(v) + '</span>'
+          : U.esc(String(v));
+        return '<dt>' + U.esc(f.label) + '</dt><dd>' + text + '</dd>';
+      }).join('')
+    : '<dd class="faint" style="grid-column:1/-1">テンプレートを使っていないため、固有の設定項目はありません</dd>';
+
+  // ---- ツリー ----
+  function render() {
+    var onlyDelayed = document.getElementById('f-delayed').checked;
+    var rows = [];
+
+    tree.children.forEach(function (t) {
+      var kids = t.children;
+      var kidShown = kids.filter(function (s) { return !onlyDelayed || s.calc.health === 'delayed'; });
+      if (onlyDelayed && t.calc.health !== 'delayed' && !kidShown.length) return;
+      rows.push(row(t, 1, kids.length > 0));
+      if (!collapsed[t.node.itemId]) kidShown.forEach(function (s) { rows.push(row(s, 2, false)); });
+    });
+
+    document.getElementById('t-count').textContent = tree.calc.childCount + ' 件';
+    document.getElementById('tree').innerHTML = rows.length
+      ? '<div class="tree-row head"><div>タスク</div><div>状態</div><div class="col-hide">進捗</div>' +
+        '<div class="col-hide">期間</div><div>担当</div><div>期限</div></div>' + rows.join('')
+      : '<div class="empty">該当するタスクがありません</div>';
+
+    document.getElementById('tree').querySelectorAll('.toggle:not(.leaf)').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        collapsed[id] = !collapsed[id];
+        render();
+      });
+    });
+  }
+
+  function row(n, level, hasKids) {
+    var node = n.node, calc = n.calc;
+    return '<div class="tree-row lv' + level + (calc.health === 'delayed' ? ' is-delayed' : '') + '">' +
+      '<div class="name">' +
+        (level === 1
+          ? '<button class="toggle' + (hasKids ? '' : ' leaf') + '" data-id="' + node.itemId +
+            '" aria-label="開閉">' + (collapsed[node.itemId] ? '▸' : '▾') + '</button>'
+          : '') +
+        U.typeChip(node.itemType) +
+        '<div class="name-cell">' +
+          '<a class="row-link txt" href="task-edit.html?id=' + node.itemId + '">' + U.esc(node.name) + '</a>' +
+          (calc.delayedInside > 0 ? ' <span class="small delay-note">配下 ' + calc.delayedInside + '</span>' : '') +
+          '<div class="small muted">' + U.esc(node.itemKey) +
+            (level === 1 ? ' ・ <a class="add-sub" href="task-edit.html?parent=' + node.itemId +
+              '" title="このタスクの下に子タスクを作る">＋ 子タスク</a>' : '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div>' + U.healthBadge(calc.health) + '</div>' +
+      '<div class="col-hide">' + U.progressBar(calc) + '</div>' +
+      '<div class="small col-hide">' + U.periodText(node.startDate, node.endDate) + '</div>' +
+      '<div class="small">' + U.assignee(node.assigneeUserId) + '</div>' +
+      '<div class="small">' + U.dueText(calc) + '</div>' +
+    '</div>';
+  }
+
+  document.getElementById('f-delayed').addEventListener('change', render);
+  document.getElementById('btn-toggle').addEventListener('click', function () {
+    var anyOpen = tree.children.some(function (t) { return !collapsed[t.node.itemId]; });
+    tree.children.forEach(function (t) { collapsed[t.node.itemId] = anyOpen; });
+    this.textContent = anyOpen ? 'すべて開く' : 'すべて折りたたむ';
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

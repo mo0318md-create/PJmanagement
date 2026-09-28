@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>マイタスク｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="page-head">
+        <div>
+          <h1 id="title">マイタスク</h1>
+          <div class="sub" id="subtitle">担当者単位 ─ 自分にアサインされたタスクを期限順に確認します</div>
+        </div>
+        <span class="spacer"></span>
+      </div>
+
+      <div class="callout small" style="margin-bottom:14px">
+        負荷・関わっているプロジェクト・担当分のガントも含めて見るときは
+        <a id="link-member" href="member.html">自分の状況ページ</a> を開いてください。
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="card">
+        <div class="card-head" style="padding-bottom:0;border-bottom:none">
+          <div class="tabs" id="tabs" style="width:100%"></div>
+        </div>
+        <div class="card-body tight">
+          <div id="list"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-4-1〜F-4-7。マイタスクは自分専用です。他の担当者の状況は ⑮ 個人ページで見ます（F-4-6）。ヘッダー右の名前の切替はモック用（ログイン中の人を切り替えるだけ）です。</li>
+          <li>ステータスは一覧上のセレクトで直接変更できます（F-4-4）。モックなので変更はページ内のみで保持され、リロードで戻ります。</li>
+          <li>タスク（第2階層）と子タスク（第3階層）を混在表示し、行内に「プロジェクト名 ／ 親タスク名」を出して文脈がわかるようにしています（F-4-3）。</li>
+          <li>未確定: 「今週」の範囲は7日固定（設定で変更可）。週の区切り（日曜起点）にすべきか要検討。</li>
+          <li>未確定: 未アサインのタスクを管理者に知らせる導線が今はありません。プロジェクト一覧側に出すか検討。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  var me = UI.renderShell({ active: 'my-tasks', view: 'people' });
+
+  var ORDER = ['delayed', 'today', 'week', 'later', 'no_date', 'done'];
+  var current = 'delayed';
+  var rows = [];
+  var overrides = {};   // itemId -> ステータスキー（モック上の一時変更）
+
+  var lm = document.getElementById('link-member');
+  if (lm) lm.href = 'member.html?user=' + me.userId;
+
+  function load() {
+    rows = U.assignedItems(me.userId);
+    document.getElementById('title').textContent = me.name + ' さんのタスク';
+    document.getElementById('subtitle').textContent =
+      '担当者視点 ─ ' + me.name + ' さんにアサインされたタスク・子タスクをプロジェクト横断で表示しています';
+  }
+
+  // ステータス名はプロジェクトごとに違うので、区分はステータスの「分類」で判定する
+  function statusKeyOf(r) {
+    return overrides[r.item.itemId] || r.item.statusKey;
+  }
+  function categoryOf(r) {
+    return H.statusCategory(r.project, statusKeyOf(r));
+  }
+  function bucketOf(r) {
+    return H.dueBucket(
+      { statusCategory: categoryOf(r), endDate: r.item.endDate },
+      D.today, D.settings.weekRangeDays
+    );
+  }
+
+  function grouped() {
+    var g = {};
+    ORDER.forEach(function (k) { g[k] = []; });
+    rows.forEach(function (r) { g[bucketOf(r)].push(r); });
+    return g;
+  }
+
+  function renderStats(g) {
+    var open = rows.filter(function (r) { return categoryOf(r) !== 'done'; }).length;
+    document.getElementById('stats').innerHTML = '' +
+      '<div class="stat delayed"><div class="label">遅延</div><div class="value num">' + g.delayed.length + '<span class="unit">件</span></div></div>' +
+      '<div class="stat at_risk"><div class="label">今日期限</div><div class="value num">' + g.today.length + '<span class="unit">件</span></div></div>' +
+      '<div class="stat on_track"><div class="label">今週（' + D.settings.weekRangeDays + '日以内）</div><div class="value num">' + g.week.length + '<span class="unit">件</span></div></div>' +
+      '<div class="stat not_started"><div class="label">未完了 合計</div><div class="value num">' + open + '<span class="unit">件</span></div></div>' +
+      '<div class="stat done"><div class="label">完了済み</div><div class="value num">' + g.done.length + '<span class="unit">件</span></div></div>';
+  }
+
+  function renderTabs(g) {
+    document.getElementById('tabs').innerHTML = ORDER.filter(function (k) {
+      return g[k].length > 0 || k === 'delayed' || k === 'today';
+    }).map(function (k) {
+      var alert = (k === 'delayed' && g[k].length > 0) ? ' alert' : '';
+      return '<button data-k="' + k + '"' + (k === current ? ' class="active"' : '') + '>' +
+        H.BUCKET_LABEL[k] + '<span class="count' + alert + '">' + g[k].length + '</span></button>';
+    }).join('');
+
+    document.getElementById('tabs').querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () { current = this.getAttribute('data-k'); render(); });
+    });
+  }
+
+  function cardHtml(r) {
+    var st = categoryOf(r);
+    var key = statusKeyOf(r);
+    var bucket = bucketOf(r);
+    var cls = bucket === 'delayed' ? ' is-delayed' : (bucket === 'today' ? ' is-today' : '');
+    var delayDays = (r.item.endDate && st !== 'done') ? -H.diffDays(D.today, r.item.endDate) : 0;
+
+    var dueLine;
+    if (!r.item.endDate) dueLine = '<span class="faint">期限なし</span>';
+    else if (delayDays > 0) dueLine = '<span class="num">' + H.formatDate(r.item.endDate) + '</span><br><span class="delay-note">' + '超過+' + delayDays + '日</span>';
+    else if (delayDays === 0 && st !== 'done') dueLine = '<span class="num">' + H.formatDate(r.item.endDate) + '</span><br><span style="color:var(--h-at-risk);font-weight:700">今日期限</span>';
+    else dueLine = '<span class="num">' + H.formatDate(r.item.endDate) + '</span><br><span class="small">' + (st === 'done' ? '完了' : 'あと' + H.diffDays(D.today, r.item.endDate) + '日') + '</span>';
+
+    var path = U.esc(r.project.name) + (r.parentTask ? ' ／ ' + U.esc(r.parentTask.name) : '');
+    var levelTag = r.item.level === 1 ? 'タスク' : '子タスク';
+
+    // 選択肢はそのプロジェクトのステータス列（CORP なら「レビュー待ち」、EXPO なら「手配済み」など）
+    var opts = H.statusesOf(r.project).map(function (s) {
+      return '<option value="' + U.esc(s.key) + '"' + (s.key === key ? ' selected' : '') + '>' + U.esc(s.label) + '</option>';
+    }).join('');
+
+    return '<div class="task-card' + cls + '">' +
+      '<div style="min-width:0">' +
+        '<div class="t-title">' +
+          '<a class="row-link" href="task-edit.html?id=' + r.item.itemId + '">' + U.esc(r.item.name) + '</a>' +
+          '<span class="tag">' + levelTag + '</span>' + U.slipChip(r.item.calc) +
+        '</div>' +
+        '<div class="t-path"><a href="project-detail.html?id=' + r.project.projectId + '">' + path + '</a></div>' +
+      '</div>' +
+      '<div class="t-right">' +
+        '<div class="t-due">' + dueLine + '</div>' +
+        '<select class="inline" data-item="' + r.item.itemId + '" aria-label="ステータス変更">' + opts + '</select>' +
+      '</div>' +
+      '</div>';
+  }
+
+  function render() {
+    var g = grouped();
+    renderStats(g);
+    renderTabs(g);
+
+    var list = g[current] || [];
+    var el = document.getElementById('list');
+    if (!list.length) {
+      el.innerHTML = '<div class="empty">' + H.BUCKET_LABEL[current] + 'のタスクはありません 🎉</div>';
+      return;
+    }
+    el.innerHTML = list.map(cardHtml).join('');
+
+    el.querySelectorAll('select[data-item]').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        overrides[this.getAttribute('data-item')] = this.value;
+        render();
+      });
+    });
+  }
+
+  load();
+  // 初期タブは「遅延があれば遅延、なければ今日 → 今週」
+  var g0 = grouped();
+  current = g0.delayed.length ? 'delayed' : (g0.today.length ? 'today' : 'week');
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設定｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .sim { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center; }
+  .scale { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+  .scale div { display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+  .scale .s-delayed { background: var(--h-delayed-bg); color: var(--h-delayed); }
+  .scale .s-at_risk { background: var(--h-at-risk-bg); color: var(--h-at-risk); }
+  .scale .s-on_track { background: var(--h-on-track-bg); color: var(--h-on-track); }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  @media (max-width: 700px) { .sim { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="page-head">
+        <div>
+          <h1>設定</h1>
+          <div class="sub">進捗判定のルール、作業の重さ、ユーザーと稼働、祝日、ラベル、お知らせを管理します（管理者のみ）</div>
+        </div>
+      </div>
+
+      <!-- ===== 判定設定 ===== -->
+      <div class="card">
+        <div class="card-head"><h2>進捗判定</h2></div>
+        <div class="card-body">
+          <div class="grid2">
+            <div class="field">
+              <label for="s-mode">既定の判定モード</label>
+              <select id="s-mode">
+                <option value="auto">自動集計</option>
+                <option value="manual">進捗率手入力</option>
+                <option value="deadline">終了日超過のみ</option>
+              </select>
+              <div class="help" id="s-mode-help">—</div>
+            </div>
+            <div class="field">
+              <label for="s-week">「今週」とみなす日数</label>
+              <input type="number" id="s-week" min="1" max="31">
+              <div class="help">担当者ビューのタブ区分に使われます</div>
+            </div>
+            <div class="field">
+              <label for="s-atrisk">「注意」のしきい値（pt）</label>
+              <input type="number" id="s-atrisk" step="1" max="0">
+              <div class="help">予定進捗との差がこれを下回ると「注意」（例: -10）</div>
+            </div>
+            <div class="field">
+              <label for="s-delayed">「遅延」のしきい値（pt）</label>
+              <input type="number" id="s-delayed" step="1" max="0">
+              <div class="help">予定進捗との差がこれを下回ると「遅延」（例: -25）</div>
+            </div>
+          </div>
+
+          <h3 style="margin:8px 0">しきい値のイメージ</h3>
+          <div class="scale" id="scale"></div>
+          <div class="small faint" style="display:flex;justify-content:space-between;margin-top:4px">
+            <span>-100pt（大きく遅れ）</span><span>0pt（予定どおり）</span><span>+100pt（前倒し）</span>
+          </div>
+
+          <div class="sim" style="margin-top:16px">
+            <div>
+              <label class="small muted" for="s-sim">シミュレーション: 予定との差分 <b id="sim-val" class="num">-15</b> pt</label>
+              <input type="range" id="s-sim" min="-60" max="30" value="-15">
+            </div>
+            <div id="sim-out"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 作業の重さ ===== -->
+      <div class="card">
+        <div class="card-head"><h2>作業の重さ（負荷の計算）</h2></div>
+        <div class="card-body">
+          <div class="grid2">
+            <div class="field">
+              <label for="s-weight">親・プロジェクトの進捗の重み</label>
+              <select id="s-weight">
+                <option value="duration">期間日数（既定）</option>
+                <option value="effort">作業の重さ（人日）</option>
+              </select>
+              <div class="help" id="s-weight-help">—</div>
+            </div>
+            <div class="field">
+              <label for="s-cap">週あたりの稼働（人日）</label>
+              <input type="number" id="s-cap" min="1" max="7" step="0.5">
+              <div class="help">担当者別の負荷で、負荷率の分母になります</div>
+            </div>
+            <div class="field">
+              <label for="s-hpd">1人日あたりの時間</label>
+              <input type="number" id="s-hpd" min="1" max="24" step="0.5">
+              <div class="help">予定工数(h)を人日に換算するときの割り算に使います</div>
+            </div>
+            <div class="field">
+              <label for="s-over">同時進行が「多い」件数</label>
+              <input type="number" id="s-over" min="2" max="20">
+              <div class="help">件数表示のときに赤くするしきい値</div>
+            </div>
+          </div>
+
+          <h3 style="margin:14px 0 8px">サイズ → 人日</h3>
+          <div class="grid2" id="size-fields"></div>
+          <div class="help" style="margin-top:6px">サイズ未入力のタスクは期間から自動推定します（3日以内=S / 7日以内=M / 20日以内=L / それ以上=XL）。</div>
+
+          <div class="callout small" id="weight-impact" style="margin-top:16px">—</div>
+        </div>
+      </div>
+
+      <!-- ===== 影響確認 ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>現在のプロジェクトへの影響</h2>
+          <span class="spacer"></span>
+          <span class="small muted">設定を変えると、この判定結果がその場で変わります</span>
+        </div>
+        <div class="card-body tight">
+          <table class="tbl">
+            <thead><tr><th>プロジェクト</th><th>差分</th><th>現在の設定</th><th>変更後</th></tr></thead>
+            <tbody id="impact"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===== ユーザー管理 ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>ユーザー</h2>
+          <span class="chip" id="u-cnt">—</span>
+          <span class="spacer"></span>
+          <button class="btn sm" id="add-user">＋ ユーザーを追加</button>
+        </div>
+        <div class="card-body tight">
+          <table class="tbl">
+            <thead>
+              <tr><th>氏名</th><th class="col-hide">メール（Googleアカウント）</th><th>権限</th><th>週の稼働（人日）</th><th>補足</th><th class="c">有効</th><th class="c col-hide">担当中</th></tr>
+            </thead>
+            <tbody id="users"></tbody>
+          </table>
+        </div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none">
+          <span class="small muted">「週の稼働」は、その人が1週間（5営業日）でこのシステムの仕事に使える人日です。兼務・時短の人は小さくします。祝日・会社休日・本人の休みは自動で差し引きます。「担当中」はアサインされた未完了の件数です。</span>
+        </div>
+      </div>
+
+      <div class="btn-row" style="justify-content:flex-end;margin-bottom:16px">
+        <button class="btn primary" id="btn-save">設定を保存</button>
+      </div>
+
+      <!-- ===== 休み ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>休み（個人）</h2>
+          <span class="chip" id="lv-cnt">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label for="lv-user">対象</label><select class="inline" id="lv-user"></select>
+            <label for="lv-start">開始</label><input type="date" id="lv-start" class="inline">
+            <label for="lv-end">終了</label><input type="date" id="lv-end" class="inline">
+            <input type="text" id="lv-reason" class="inline" placeholder="理由（任意）" style="width:120px">
+            <button class="btn sm" id="lv-add">＋ 追加</button>
+          </div>
+        </div>
+        <div class="card-body tight"><table class="tbl"><tbody id="leaves"></tbody></table></div>
+      </div>
+
+      <!-- ===== 祝日・会社休日 ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>祝日・会社休日（全員）</h2>
+          <span class="chip" id="hd-cnt">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label for="hd-date">日付</label><input type="date" id="hd-date" class="inline">
+            <input type="text" id="hd-name" class="inline" placeholder="名前（例：創立記念日）" style="width:160px">
+            <button class="btn sm" id="hd-add">＋ 会社休日を追加</button>
+          </div>
+        </div>
+        <div class="card-body tight"><table class="tbl"><tbody id="holidays"></tbody></table></div>
+        <div class="card-head small muted" style="border-top:1px solid var(--border);border-bottom:none">
+          祝日は毎年、内閣府の「国民の祝日」CSVから取り込む想定です。土日・祝日・会社休日は稼働日から外し、負荷の計算で稼働を差し引きます。
+        </div>
+      </div>
+
+      <!-- ===== ラベル ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>ラベル（全プロジェクト共通）</h2>
+          <span class="chip" id="lb-cnt">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <input type="text" id="lb-name" class="inline" placeholder="ラベル名" style="width:140px">
+            <select class="inline" id="lb-color" aria-label="色">
+              <option value="#E8E2F4">紫</option><option value="#DDEAF7">青</option><option value="#F8E3D8">橙</option>
+              <option value="#E2EFE6">緑</option><option value="#FBF0D5">黄</option><option value="#EDEAE4">灰</option>
+            </select>
+            <button class="btn sm" id="lb-add">＋ 追加</button>
+          </div>
+        </div>
+        <div class="card-body tight"><table class="tbl"><tbody id="labels"></tbody></table></div>
+      </div>
+
+      <!-- ===== お知らせ ===== -->
+      <div class="card">
+        <div class="card-head"><h2>お知らせ（画面内）</h2><span class="spacer"></span><span class="small muted">メール・チャットへの送信は今回のスコープ外</span></div>
+        <div class="card-body" id="notify-settings"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-1（ユーザー管理）／F-5-3（既定モード・しきい値）／F-2-16（作業の重さ）／F-5-5（人ごとの稼働・休み・祝日）／F-5-6（ラベル）／F-5-7（お知らせ）</li>
+          <li>負荷率の分母＝その人の「週の稼働（人日）」×（その週の稼働日のうち本人の休みでない日）÷5。シルバーウィークのように稼働日が少ない週は、稼働も負荷もその分小さく配ります。</li>
+          <li>「進捗の重み」を切り替えると、親とプロジェクトの実績進捗の出し方が変わります。既定は従来どおり期間日数なので、切り替えない限り今の判定結果は変わりません。下の影響欄で、切り替えたときに判定が変わるプロジェクトを先に確認できます。</li>
+          <li>しきい値を動かすと「現在のプロジェクトへの影響」がその場で更新されます。運用前にどのくらい厳しい判定になるかを確認できます。</li>
+          <li>未確定: 権限は admin / member の2段階のみ。プロジェクト単位の閲覧制限が必要かは今回スコープ外としています。</li>
+          <li>未確定: ユーザーの追加はメール手入力を想定。Googleグループ連携にするかは運用次第。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  UI.renderShell({ active: 'settings', view: 'project' });
+
+  var elMode = document.getElementById('s-mode');
+  var elWeek = document.getElementById('s-week');
+  var elAtRisk = document.getElementById('s-atrisk');
+  var elDelayed = document.getElementById('s-delayed');
+  var elSim = document.getElementById('s-sim');
+
+  elMode.value = D.settings.defaultProgressMode;
+  elWeek.value = D.settings.weekRangeDays;
+  elAtRisk.value = Math.round(D.settings.thresholdAtRisk * 100);
+  elDelayed.value = Math.round(D.settings.thresholdDelayed * 100);
+
+  function thresholds() {
+    var a = Number(elAtRisk.value) / 100;
+    var d = Number(elDelayed.value) / 100;
+    if (d > a) d = a;   // 遅延は注意より厳しい側であること
+    return { atRisk: a, delayed: d };
+  }
+
+  function healthFromDelta(delta, th) {
+    if (delta >= th.atRisk) return 'on_track';
+    if (delta >= th.delayed) return 'at_risk';
+    return 'delayed';
+  }
+
+  function renderScale() {
+    var th = thresholds();
+    // -100pt 〜 +100pt を 200pt 幅として配分
+    var delayedW = (th.delayed * 100 + 100);
+    var atRiskW = (th.atRisk * 100) - (th.delayed * 100);
+    var okW = 200 - delayedW - atRiskW;
+    document.getElementById('scale').innerHTML =
+      '<div class="s-delayed" style="width:' + (delayedW / 2) + '%">遅延</div>' +
+      '<div class="s-at_risk" style="width:' + (atRiskW / 2) + '%">注意</div>' +
+      '<div class="s-on_track" style="width:' + (okW / 2) + '%">順調</div>';
+  }
+
+  function renderSim() {
+    var delta = Number(elSim.value);
+    document.getElementById('sim-val').textContent = (delta >= 0 ? '+' : '') + delta;
+    var h = healthFromDelta(delta / 100, thresholds());
+    document.getElementById('sim-out').innerHTML =
+      '<div class="small muted">この差分なら</div>' + U.healthBadge(h);
+  }
+
+  function renderImpact() {
+    var th = thresholds();
+    document.getElementById('impact').innerHTML = D.projects.map(function (p) {
+      var before = U.projectTree(p);
+      var after = H.evaluateTree(
+        H.buildTree(p, D.itemsOfProject(p.projectId)),
+        // プロジェクトに明示指定があればそれを、なければ画面で選んだ既定モードを使う
+        { mode: p.progressMode || elMode.value, today: D.today, thresholds: th }
+      );
+      var changed = before.calc.health !== after.calc.health;
+      return '<tr>' +
+        '<td><a class="row-link" href="project-detail.html?id=' + p.projectId + '">' + U.esc(p.name) + '</a></td>' +
+        '<td class="num small">' + (after.calc.delta === null ? '—' :
+          (after.calc.delta >= 0 ? '+' : '') + Math.round(after.calc.delta * 100) + ' pt') + '</td>' +
+        '<td>' + U.healthBadge(before.calc.health) + '</td>' +
+        '<td>' + U.healthBadge(after.calc.health) +
+          (changed ? ' <span class="small" style="color:var(--accent);font-weight:700">← 変化</span>' : '') + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  document.addEventListener('change', function (ev) {
+    var t = ev.target;
+    if (t && t.getAttribute && t.getAttribute('data-cap')) {
+      var u = D.userById(t.getAttribute('data-cap'));
+      if (u) u.weeklyCapacityDays = Number(t.value) || 5;
+    }
+  });
+
+  function renderUsers() {
+    document.getElementById('u-cnt').textContent = D.users.length + ' 名';
+    document.getElementById('users').innerHTML = D.users.map(function (u) {
+      var open = D.items.filter(function (i) {
+        return i.assigneeUserId === u.userId && i.status !== 'done';
+      }).length;
+      return '<tr>' +
+        '<td><a class="row-link" href="my-tasks.html?user=' + u.userId + '">' + U.esc(u.name) + '</a></td>' +
+        '<td class="col-hide small muted">' + U.esc(u.email) + '</td>' +
+        '<td><select class="inline">' +
+          '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>管理者</option>' +
+          '<option value="member"' + (u.role === 'member' ? ' selected' : '') + '>担当者</option>' +
+          '</select></td>' +
+        '<td><input type="number" class="inline" min="0.5" max="5" step="0.5" style="width:70px" value="' + (u.weeklyCapacityDays || 5) + '" data-cap="' + u.userId + '" aria-label="' + U.esc(u.name) + ' の週の稼働"></td>' +
+        '<td class="small muted">' + U.esc(u.capacityNote || '') + '</td>' +
+        '<td class="c"><input type="checkbox"' + (u.active ? ' checked' : '') + '></td>' +
+        '<td class="c num col-hide">' + open + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  // ---- 休み・祝日・ラベル・お知らせ ----
+  function renderLeaves() {
+    var sel = document.getElementById('lv-user');
+    if (!sel.options.length) sel.innerHTML = D.users.map(function (u) { return '<option value="' + u.userId + '">' + U.esc(u.name) + '</option>'; }).join('');
+    document.getElementById('lv-cnt').textContent = D.leaves.length + ' 件';
+    document.getElementById('leaves').innerHTML = D.leaves.length ? D.leaves.map(function (l, i) {
+      return '<tr><td>' + U.esc(D.userName(l.userId)) + '</td><td>' + U.periodText(l.start, l.end) + '</td>' +
+        '<td class="small muted">' + U.esc(l.reason || '') + '</td>' +
+        '<td class="c"><button class="btn ghost sm" data-del-leave="' + i + '">削除</button></td></tr>';
+    }).join('') : '<tr><td><div class="empty">登録された休みはありません</div></td></tr>';
+    document.querySelectorAll('[data-del-leave]').forEach(function (b) {
+      b.addEventListener('click', function () { D.leaves.splice(+b.getAttribute('data-del-leave'), 1); renderLeaves(); });
+    });
+  }
+  document.getElementById('lv-add').addEventListener('click', function () {
+    var st = document.getElementById('lv-start').value, en = document.getElementById('lv-end').value || st;
+    if (!st) { alert('開始日を入れてください'); return; }
+    D.leaves.push({ leaveId: 'lv' + Date.now(), userId: document.getElementById('lv-user').value, start: st, end: en,
+      reason: document.getElementById('lv-reason').value });
+    renderLeaves();
+  });
+
+  function renderHolidays() {
+    var list = D.holidays.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    document.getElementById('hd-cnt').textContent = list.length + ' 日';
+    document.getElementById('holidays').innerHTML = list.map(function (h) {
+      var idx = D.holidays.indexOf(h);
+      return '<tr><td class="num">' + U.esc(H.formatDate(h.date, true)) + '</td><td>' + U.esc(h.name) + '</td>' +
+        '<td><span class="tag">' + U.esc(h.kind) + '</span></td>' +
+        '<td class="c">' + (h.kind === '会社休日' ? '<button class="btn ghost sm" data-del-hd="' + idx + '">削除</button>' : '<span class="small faint">取り込み</span>') + '</td></tr>';
+    }).join('');
+    document.querySelectorAll('[data-del-hd]').forEach(function (b) {
+      b.addEventListener('click', function () { D.holidays.splice(+b.getAttribute('data-del-hd'), 1); renderHolidays(); });
+    });
+  }
+  document.getElementById('hd-add').addEventListener('click', function () {
+    var dt = document.getElementById('hd-date').value, nm = document.getElementById('hd-name').value.trim();
+    if (!dt || !nm) { alert('日付と名前を入れてください'); return; }
+    D.holidays.push({ date: dt, name: nm, kind: '会社休日' });
+    renderHolidays();
+  });
+
+  function renderLabels() {
+    document.getElementById('lb-cnt').textContent = D.labels.length + ' 件';
+    document.getElementById('labels').innerHTML = D.labels.map(function (l, i) {
+      var used = D.items.filter(function (it) { return (it.labelIds || []).indexOf(l.labelId) >= 0; }).length;
+      return '<tr><td><span style="font-size:12px;border-radius:4px;padding:2px 8px;background:' + l.color + '">' + U.esc(l.name) + '</span></td>' +
+        '<td><input type="text" class="inline" value="' + U.esc(l.name) + '" data-rename-lb="' + i + '" aria-label="名前を変更" style="width:140px"></td>' +
+        '<td class="small muted">' + used + '件で使用中</td>' +
+        '<td class="c"><button class="btn ghost sm" data-del-lb="' + i + '">削除</button></td></tr>';
+    }).join('');
+    document.querySelectorAll('[data-rename-lb]').forEach(function (inp) {
+      inp.addEventListener('change', function () { D.labels[+inp.getAttribute('data-rename-lb')].name = inp.value; renderLabels(); });
+    });
+    document.querySelectorAll('[data-del-lb]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var l = D.labels[+b.getAttribute('data-del-lb')];
+        var used = D.items.filter(function (it) { return (it.labelIds || []).indexOf(l.labelId) >= 0; }).length;
+        if (used && !confirm('「' + l.name + '」は ' + used + ' 件のタスクで使われています。外して削除しますか？')) return;
+        D.items.forEach(function (it) { it.labelIds = (it.labelIds || []).filter(function (x) { return x !== l.labelId; }); });
+        D.labels.splice(+b.getAttribute('data-del-lb'), 1);
+        renderLabels();
+      });
+    });
+  }
+  document.getElementById('lb-add').addEventListener('click', function () {
+    var nm = document.getElementById('lb-name').value.trim();
+    if (!nm) { alert('ラベル名を入れてください'); return; }
+    D.labels.push({ labelId: 'l' + Date.now(), name: nm, color: document.getElementById('lb-color').value });
+    document.getElementById('lb-name').value = '';
+    renderLabels();
+  });
+
+  function renderNotify() {
+    document.getElementById('notify-settings').innerHTML = D.notifyKinds.map(function (k) {
+      return '<label class="check-line" style="display:flex;margin:4px 0"><input type="checkbox" data-nk="' + k.kind + '"' +
+        (D.notifySettings[k.kind] ? ' checked' : '') + '> ' + U.esc(k.label) + '</label>';
+    }).join('') + '<div class="small muted" style="margin-top:8px">お知らせはヘッダーのベルに出ます。ここで外した種類は、全員のお知らせに出なくなります。</div>';
+    document.querySelectorAll('[data-nk]').forEach(function (c) {
+      c.addEventListener('change', function () { D.notifySettings[c.getAttribute('data-nk')] = c.checked; });
+    });
+  }
+
+  // ---- 作業の重さ ----
+  var elWeight = document.getElementById("s-weight");
+  var elCap = document.getElementById("s-cap");
+  var elHpd = document.getElementById("s-hpd");
+  var elOver = document.getElementById("s-over");
+  elWeight.value = D.settings.rollupWeight;
+  elCap.value = D.settings.weeklyCapacityDays;
+  elHpd.value = D.settings.hoursPerDay;
+  elOver.value = D.settings.overloadThreshold;
+
+  document.getElementById("size-fields").innerHTML = H.SIZE_ORDER.map(function (k) {
+    return '<div class="field"><label for="s-size-' + k + '">' + H.SIZE_LABEL[k] + '</label>' +
+      '<input type="number" id="s-size-' + k + '" min="0.25" step="0.25" value="' + D.settings.sizeDays[k] + '"></div>';
+  }).join("");
+
+  function effortOpts() {
+    var sd = {};
+    H.SIZE_ORDER.forEach(function (k) { sd[k] = Number(document.getElementById("s-size-" + k).value) || D.settings.sizeDays[k]; });
+    return { sizeDays: sd, hoursPerDay: Number(elHpd.value) || 8, weeklyCapacityDays: Number(elCap.value) || 5 };
+  }
+
+  function renderWeightImpact() {
+    var th = thresholds(), opt = effortOpts();
+    document.getElementById("s-weight-help").textContent = elWeight.value === "effort"
+      ? "親の実績＝子の重さ（人日）で加重した平均"
+      : "親の実績＝子の期間日数で加重した平均（これまでどおり）";
+
+    // 重み以外は同じ条件で、期間日数と重さの両方を計算して差を見せる
+    var diff = [], total = 0;
+    D.projects.forEach(function (p) {
+      if (p.archived) return;
+      var base = { mode: p.progressMode || elMode.value, today: D.today, thresholds: th, effort: opt };
+      function ev(w) {
+        return H.evaluateTree(H.buildTree(p, D.itemsOfProject(p.projectId)),
+          Object.assign({}, base, { rollupWeight: w }));
+      }
+      var a = ev("duration").calc, b = ev("effort").calc;
+      total += 1;
+      if (a.health !== b.health || Math.abs(a.actualRate - b.actualRate) >= 0.03) {
+        diff.push(U.esc(p.name) + "：期間日数 " + H.pct(a.actualRate) + "（" + H.HEALTH_LABEL[a.health] + "）" +
+          " → 重さ " + H.pct(b.actualRate) + "（" + H.HEALTH_LABEL[b.health] + "）");
+      }
+    });
+    document.getElementById("weight-impact").innerHTML = diff.length
+      ? "<strong>重みを切り替えると変わるプロジェクト（" + diff.length + "/" + total + "）</strong><br>" + diff.join("<br>")
+      : "いまのデータでは、重みを切り替えても実績進捗は3pt以上変わりません（" + total + "件を比較）。";
+  }
+
+  function renderModeHelp() {
+    document.getElementById('s-mode-help').textContent = H.MODE_DESC[elMode.value];
+  }
+
+  function renderAll() { renderScale(); renderSim(); renderImpact(); renderModeHelp(); renderWeightImpact(); }
+  renderLeaves(); renderHolidays(); renderLabels(); renderNotify();
+
+  [elMode, elAtRisk, elDelayed, elWeek, elWeight, elCap, elHpd, elOver].concat(
+    H.SIZE_ORDER.map(function (k) { return document.getElementById("s-size-" + k); })
+  ).forEach(function (el) {
+    el.addEventListener('input', renderAll);
+    el.addEventListener('change', renderAll);
+  });
+  elSim.addEventListener('input', renderSim);
+
+  document.getElementById('add-user').addEventListener('click', function () {
+    alert('［モック］氏名とメールアドレスを入力するダイアログを開きます。');
+  });
+  document.getElementById('btn-save').addEventListener('click', function () {
+    alert('［モック］設定を保存しました。\n既定モード: ' + H.MODE_LABEL[elMode.value] +
+      '\n注意: ' + elAtRisk.value + 'pt ／ 遅延: ' + elDelayed.value + 'pt' +
+      '\n今週の範囲: ' + elWeek.value + '日');
+  });
+
+  renderUsers();
+  renderAll();
+})();
+</script>
+</body>
+</html>

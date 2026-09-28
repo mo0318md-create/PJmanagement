@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>テンプレート編集｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  /* この画面だけで使う編集グリッド */
+  .ti-row { display: grid; grid-template-columns: 24px minmax(160px, 1fr) 128px 96px 96px 40px; gap: 8px; align-items: center; padding: 7px 14px; border-bottom: 1px solid var(--border); }
+  .ti-row.head { background: var(--surface-2); font-size: 12px; color: var(--text-muted); font-weight: 700; }
+  .ti-row.lv2 .ti-name { padding-left: 18px; }
+  .ti-row input, .ti-row select { padding: 5px 8px; font-size: 13px; }
+  .ti-row .lvmark { font-size: 11px; color: var(--text-faint); text-align: center; }
+  .tf-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) minmax(110px, .9fr) 118px minmax(120px, 1fr) 66px 40px; gap: 8px; align-items: center; padding: 7px 14px; border-bottom: 1px solid var(--border); }
+  .tf-row.head { background: var(--surface-2); font-size: 12px; color: var(--text-muted); font-weight: 700; }
+  .tf-row input, .tf-row select { padding: 5px 8px; font-size: 13px; }
+  .mini { position: relative; height: 18px; background: var(--bar-track); border-radius: 4px; }
+  .mini .b { position: absolute; top: 2px; height: 14px; border-radius: 4px; background: var(--accent); opacity: .85; }
+  .mini .b.lv2 { background: var(--h-not-started); opacity: .7; height: 10px; top: 4px; }
+  .m-row { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 10px; align-items: center; padding: 4px 14px; }
+  @media (max-width: 900px) {
+    .ti-row { grid-template-columns: 20px 1fr 72px 72px 34px; }
+    .ti-row .ti-role { display: none; }
+    .tf-row { grid-template-columns: 1fr 1fr 34px; }
+    .tf-row .tf-opt, .tf-row .tf-req, .tf-row .tf-key { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="breadcrumb"><a href="template-list.html">テンプレート一覧</a> ／ <span id="bc">—</span></div>
+
+      <div class="page-head">
+        <div>
+          <h1 id="t-title">テンプレート編集</h1>
+          <div class="sub">タスク構成・ステータス列・タスクの種別と、このテンプレート固有の設定項目を定義します</div>
+        </div>
+        <span class="spacer"></span>
+        <div class="btn-row">
+          <a class="btn" href="template-list.html">キャンセル</a>
+          <button class="btn primary" id="btn-save">保存</button>
+        </div>
+      </div>
+
+      <!-- 基本情報 -->
+      <div class="card">
+        <div class="card-head"><h2>基本情報</h2></div>
+        <div class="card-body">
+          <div class="grid2">
+            <div class="field">
+              <label for="t-name">テンプレート名<span class="req">必須</span></label>
+              <input type="text" id="t-name">
+            </div>
+            <div class="field">
+              <label for="t-cat">分類</label>
+              <input type="text" id="t-cat" placeholder="制作 / 販促 / 開発 など">
+            </div>
+            <div class="field">
+              <label for="t-days">標準日数</label>
+              <input type="number" id="t-days" min="1">
+              <div class="help">プロジェクト作成時の終了日の初期値に使われます</div>
+            </div>
+            <div class="field">
+              <label for="t-active">状態</label>
+              <select id="t-active">
+                <option value="1">有効（新規作成で選べる）</option>
+                <option value="0">無効（選択肢に出さない）</option>
+              </select>
+            </div>
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label for="t-desc">説明</label>
+            <textarea id="t-desc"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- タスク構成 -->
+      <div class="card">
+        <div class="card-head">
+          <h2>タスク構成</h2>
+          <span class="chip" id="ti-cnt">—</span>
+          <span class="spacer"></span>
+          <div class="btn-row">
+            <button class="btn sm" id="add-task">＋ タスクを追加</button>
+          </div>
+        </div>
+        <div class="card-body tight">
+          <div class="ti-row head">
+            <div></div>
+            <div>名称</div>
+            <div class="ti-role">既定ロール</div>
+            <div>開始(日目)</div>
+            <div>期間(日)</div>
+            <div></div>
+          </div>
+          <div id="ti-rows"></div>
+        </div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none">
+          <span class="small muted">「開始(日目)」はプロジェクト開始日からの相対日数です（0＝初日）。作成時に実日付へ展開されます。</span>
+        </div>
+      </div>
+
+      <!-- 相対日程のプレビュー -->
+      <div class="card">
+        <div class="card-head"><h2>日程イメージ（相対日数）</h2><span class="spacer"></span><span class="small muted" id="span-note">—</span></div>
+        <div class="card-body tight" style="padding:10px 0">
+          <div id="mini"></div>
+        </div>
+      </div>
+
+      <!-- カスタム項目 -->
+      <div class="grid2" style="align-items:start">
+        <div class="card">
+          <div class="card-head">
+            <h2>ステータス列</h2>
+            <span class="spacer"></span>
+            <button class="btn sm" id="ts-add">＋ 列を追加</button>
+          </div>
+          <div class="card-body" id="tpl-statuses"></div>
+          <div class="card-head small muted" style="border-top:1px solid var(--border);border-bottom:none">
+            分類（未着手／進行中／保留／完了）は順調・遅延の判定と横断の絞り込みに使います。作成済みのプロジェクトには遡って反映しません。
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>タスクの種別</h2>
+            <span class="spacer"></span>
+            <button class="btn sm" id="ty-add">＋ 種別を追加</button>
+          </div>
+          <div class="card-body" id="tpl-types"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>固有の設定項目</h2>
+          <span class="chip" id="tf-cnt">—</span>
+          <span class="spacer"></span>
+          <button class="btn sm" id="add-field">＋ 項目を追加</button>
+        </div>
+        <div class="card-body tight">
+          <div class="tf-row head">
+            <div>表示名</div>
+            <div class="tf-key">項目キー</div>
+            <div>型</div>
+            <div class="tf-opt">選択肢（カンマ区切り）</div>
+            <div class="tf-req">必須</div>
+            <div></div>
+          </div>
+          <div id="tf-rows"></div>
+        </div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none">
+          <span class="small muted">ここで定義した項目が、プロジェクト作成フォームに自動で現れます。項目を増やしてもコード変更は不要です。</span>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-1-2（相対日付）／F-1-3・F-1-4（カスタム項目の定義）／F-1-7（CRUD）</li>
+          <li>行の追加・削除はこのモック上で実際に動きます。日程イメージも入力に追従します。</li>
+          <li>未確定: 並べ替えのUI。現状は上下移動ボタンを想定していますが、ドラッグ＆ドロップにするか要検討。</li>
+          <li>未確定: 項目キーは表示名から自動生成するか、手入力させるか。既存プロジェクトの値と紐づくため、作成後の変更は不可にする想定です。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var D = window.MockData, U = window.UI;
+  UI.renderShell({ active: 'templates', view: 'project' });
+
+  var id = U.qs('id', 'tpl_web');
+  var isNew = (id === 'new');
+  var src = isNew ? null : D.templateById(id);
+
+  // 編集用にコピー（モックなので元データは書き換えない）
+  var model = src ? JSON.parse(JSON.stringify(src)) : {
+    templateId: 'new', name: '', description: '', category: '',
+    defaultDurationDays: 30, active: true, fields: [], items: []
+  };
+
+  document.getElementById('bc').textContent = isNew ? '新規作成' : model.name;
+  document.getElementById('t-title').textContent = isNew ? 'テンプレートを作成' : model.name;
+  document.getElementById('t-name').value = model.name;
+  document.getElementById('t-cat').value = model.category;
+  document.getElementById('t-days').value = model.defaultDurationDays;
+  document.getElementById('t-desc').value = model.description;
+  document.getElementById('t-active').value = model.active ? '1' : '0';
+
+  // ---------------- ステータス列・種別 ----------------
+  var CAT = { not_started: "未着手", in_progress: "進行中", on_hold: "保留", done: "完了" };
+  model.statuses = model.statuses || [
+    { key: "todo", label: "未対応", category: "not_started" }, { key: "doing", label: "進行中", category: "in_progress" },
+    { key: "done", label: "完了", category: "done" }];
+  model.issueTypes = model.issueTypes || ["作業", "バグ", "要望"];
+  function renderStatuses() {
+    document.getElementById("tpl-statuses").innerHTML = model.statuses.map(function (st, i) {
+      return '<div style="display:grid;grid-template-columns:22px minmax(0,1fr) 120px 60px;gap:8px;align-items:center;padding:5px 0;border-top:' + (i ? "1px solid var(--border)" : "none") + '">' +
+        '<span class="small faint num">' + (i + 1) + '</span>' +
+        '<input type="text" class="inline" value="' + U.esc(st.label) + '" data-ts-label="' + i + '" aria-label="ステータス名">' +
+        '<select class="inline" data-ts-cat="' + i + '" aria-label="分類">' + Object.keys(CAT).map(function (k) {
+          return '<option value="' + k + '"' + (st.category === k ? " selected" : "") + ">" + CAT[k] + "</option>";
+        }).join("") + "</select>" +
+        '<button class="btn ghost sm" data-ts-del="' + i + '"' + (model.statuses.length <= 2 ? " disabled" : "") + ">削除</button></div>";
+    }).join("");
+    document.querySelectorAll("[data-ts-label]").forEach(function (el) { el.addEventListener("change", function () { model.statuses[+el.getAttribute("data-ts-label")].label = el.value; }); });
+    document.querySelectorAll("[data-ts-cat]").forEach(function (el) { el.addEventListener("change", function () { model.statuses[+el.getAttribute("data-ts-cat")].category = el.value; }); });
+    document.querySelectorAll("[data-ts-del]").forEach(function (b) { b.addEventListener("click", function () { model.statuses.splice(+b.getAttribute("data-ts-del"), 1); renderStatuses(); }); });
+  }
+  function renderTypes() {
+    document.getElementById("tpl-types").innerHTML = model.issueTypes.map(function (t, i) {
+      return '<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-top:' + (i ? "1px solid var(--border)" : "none") + '">' +
+        '<input type="text" class="inline" value="' + U.esc(t) + '" data-ty="' + i + '" aria-label="種別名" style="flex:1">' +
+        '<button class="btn ghost sm" data-ty-del="' + i + '"' + (model.issueTypes.length <= 1 ? " disabled" : "") + ">削除</button></div>";
+    }).join("") + '<div class="small muted" style="margin-top:8px">タスクを作るときに選ぶ区分です（例：作業／バグ／要望）。判定には使いません。</div>';
+    document.querySelectorAll("[data-ty]").forEach(function (el) { el.addEventListener("change", function () { model.issueTypes[+el.getAttribute("data-ty")] = el.value; }); });
+    document.querySelectorAll("[data-ty-del]").forEach(function (b) { b.addEventListener("click", function () { model.issueTypes.splice(+b.getAttribute("data-ty-del"), 1); renderTypes(); }); });
+  }
+  document.getElementById("ts-add").addEventListener("click", function () {
+    model.statuses.splice(model.statuses.length - 1, 0, { key: "st" + Date.now(), label: "新しい列", category: "in_progress" }); renderStatuses();
+  });
+  document.getElementById("ty-add").addEventListener("click", function () { model.issueTypes.push("新しい種別"); renderTypes(); });
+  renderStatuses(); renderTypes();
+
+  var seq = 1000;
+  function nid(p) { return p + (++seq); }
+
+  // ---------------- タスク構成 ----------------
+  function orderedItems() {
+    var out = [];
+    model.items.filter(function (i) { return i.level === 1; }).forEach(function (t) {
+      out.push(t);
+      model.items.filter(function (s) { return s.parentTemplateItemId === t.templateItemId; })
+        .forEach(function (s) { out.push(s); });
+    });
+    return out;
+  }
+
+  function renderItems() {
+    var list = orderedItems();
+    document.getElementById('ti-rows').innerHTML = list.map(function (it) {
+      return '<div class="ti-row lv' + it.level + '" data-id="' + it.templateItemId + '">' +
+        '<div class="lvmark">' + (it.level === 1 ? 'T' : '└') + '</div>' +
+        '<div class="ti-name"><input type="text" data-f="name" value="' + U.esc(it.name) + '"></div>' +
+        '<div class="ti-role"><input type="text" data-f="defaultRole" value="' + U.esc(it.defaultRole || '') + '"></div>' +
+        '<div><input type="number" data-f="offsetStartDays" min="0" value="' + it.offsetStartDays + '"></div>' +
+        '<div><input type="number" data-f="offsetDurationDays" min="1" value="' + it.offsetDurationDays + '"></div>' +
+        '<div class="nowrap">' +
+          (it.level === 1 ? '<button class="btn sm ghost" data-add-sub="' + it.templateItemId + '" title="子タスクを追加">＋</button>' : '') +
+          '<button class="btn sm ghost" data-del="' + it.templateItemId + '" title="削除">✕</button>' +
+        '</div>' +
+        '</div>';
+    }).join('') || '<div class="empty">タスクがありません。「＋ タスクを追加」から作成してください。</div>';
+
+    var tasks = model.items.filter(function (i) { return i.level === 1; }).length;
+    document.getElementById('ti-cnt').textContent =
+      'タスク ' + tasks + ' ／ 子タスク ' + (model.items.length - tasks);
+
+    // 入力の反映
+    document.querySelectorAll('#ti-rows [data-f]').forEach(function (el) {
+      el.addEventListener('input', function () {
+        var rowId = this.closest('.ti-row').getAttribute('data-id');
+        var target = model.items.filter(function (i) { return i.templateItemId === rowId; })[0];
+        var f = this.getAttribute('data-f');
+        target[f] = (f === 'offsetStartDays' || f === 'offsetDurationDays')
+          ? Math.max(f === 'offsetDurationDays' ? 1 : 0, Number(this.value) || 0)
+          : this.value;
+        renderMini();
+      });
+    });
+    document.querySelectorAll('#ti-rows [data-del]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var rid = this.getAttribute('data-del');
+        model.items = model.items.filter(function (i) {
+          return i.templateItemId !== rid && i.parentTemplateItemId !== rid;
+        });
+        renderItems(); renderMini();
+      });
+    });
+    document.querySelectorAll('#ti-rows [data-add-sub]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var pid = this.getAttribute('data-add-sub');
+        var p = model.items.filter(function (i) { return i.templateItemId === pid; })[0];
+        model.items.push({
+          templateItemId: nid('n'), level: 2, parentTemplateItemId: pid,
+          name: '新しい子タスク', offsetStartDays: p.offsetStartDays,
+          offsetDurationDays: Math.max(1, Math.round(p.offsetDurationDays / 2)), defaultRole: p.defaultRole || ''
+        });
+        renderItems(); renderMini();
+      });
+    });
+  }
+
+  document.getElementById('add-task').addEventListener('click', function () {
+    var last = model.items.filter(function (i) { return i.level === 1; }).slice(-1)[0];
+    var start = last ? last.offsetStartDays + last.offsetDurationDays : 0;
+    model.items.push({
+      templateItemId: nid('n'), level: 1, parentTemplateItemId: null,
+      name: '新しいタスク', offsetStartDays: start, offsetDurationDays: 5, defaultRole: ''
+    });
+    renderItems(); renderMini();
+  });
+
+  // ---------------- 日程イメージ ----------------
+  function renderMini() {
+    var list = orderedItems();
+    if (!list.length) { document.getElementById('mini').innerHTML = '<div class="empty">—</div>'; return; }
+    var span = Math.max.apply(null, list.map(function (i) { return i.offsetStartDays + i.offsetDurationDays; }));
+    span = Math.max(span, 1);
+    document.getElementById('span-note').textContent = '全体 ' + span + ' 日間';
+
+    document.getElementById('mini').innerHTML = list.map(function (i) {
+      var left = (i.offsetStartDays / span) * 100;
+      var w = Math.max(1, (i.offsetDurationDays / span) * 100);
+      return '<div class="m-row">' +
+        '<div class="small' + (i.level === 2 ? ' muted' : '') + '" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap' +
+          (i.level === 2 ? ';padding-left:14px' : ';font-weight:700') + '">' + U.esc(i.name) + '</div>' +
+        '<div class="mini"><div class="b lv' + i.level + '" style="left:' + left.toFixed(2) + '%;width:' + w.toFixed(2) + '%"' +
+          ' title="' + i.offsetStartDays + '日目から' + i.offsetDurationDays + '日間"></div></div>' +
+        '</div>';
+    }).join('');
+  }
+
+  // ---------------- カスタム項目 ----------------
+  var TYPES = [
+    ['text', 'テキスト'], ['number', '数値'], ['date', '日付'],
+    ['select', '選択リスト'], ['checkbox', 'チェックボックス']
+  ];
+
+  function renderFields() {
+    document.getElementById('tf-rows').innerHTML = model.fields.map(function (f) {
+      var typeOpts = TYPES.map(function (t) {
+        return '<option value="' + t[0] + '"' + (t[0] === f.type ? ' selected' : '') + '>' + t[1] + '</option>';
+      }).join('');
+      return '<div class="tf-row" data-id="' + f.templateFieldId + '">' +
+        '<div><input type="text" data-f="label" value="' + U.esc(f.label) + '"></div>' +
+        '<div class="tf-key"><input type="text" data-f="fieldKey" value="' + U.esc(f.fieldKey) + '"></div>' +
+        '<div><select data-f="type">' + typeOpts + '</select></div>' +
+        '<div class="tf-opt"><input type="text" data-f="options" value="' + U.esc((f.options || []).join(',')) + '"' +
+          (f.type === 'select' ? '' : ' disabled placeholder="選択リストのみ"') + '></div>' +
+        '<div class="tf-req c"><label class="check-line"><input type="checkbox" data-f="required"' + (f.required ? ' checked' : '') + '> 必須</label></div>' +
+        '<div><button class="btn sm ghost" data-del-f="' + f.templateFieldId + '" title="削除">✕</button></div>' +
+        '</div>';
+    }).join('') || '<div class="empty">固有の設定項目はありません。共通項目（名称・期間・オーナー）だけで運用します。</div>';
+
+    document.getElementById('tf-cnt').textContent = model.fields.length + ' 項目';
+
+    document.querySelectorAll('#tf-rows [data-f]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        var rowId = this.closest('.tf-row').getAttribute('data-id');
+        var t = model.fields.filter(function (x) { return x.templateFieldId === rowId; })[0];
+        var f = this.getAttribute('data-f');
+        if (f === 'required') t.required = this.checked;
+        else if (f === 'options') t.options = this.value ? this.value.split(',').map(function (s) { return s.trim(); }) : null;
+        else t[f] = this.value;
+        if (f === 'type') renderFields();
+      });
+    });
+    document.querySelectorAll('#tf-rows [data-del-f]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var fid = this.getAttribute('data-del-f');
+        model.fields = model.fields.filter(function (x) { return x.templateFieldId !== fid; });
+        renderFields();
+      });
+    });
+  }
+
+  document.getElementById('add-field').addEventListener('click', function () {
+    model.fields.push({
+      templateFieldId: nid('f'), fieldKey: 'field_' + (model.fields.length + 1),
+      label: '新しい項目', type: 'text', options: null, required: false, helpText: ''
+    });
+    renderFields();
+  });
+
+  document.getElementById('btn-save').addEventListener('click', function () {
+    var name = document.getElementById('t-name').value.trim();
+    if (!name) { alert('テンプレート名を入力してください。'); return; }
+    alert('［モック］「' + name + '」を保存しました。\nタスク ' +
+      model.items.filter(function (i) { return i.level === 1; }).length +
+      ' ／ 子タスク ' + model.items.filter(function (i) { return i.level === 2; }).length +
+      ' ／ 設定項目 ' + model.fields.length + '\n\n※ 既存プロジェクトには遡及しません。');
+    location.href = 'template-list.html';
+  });
+
+  renderItems();
+  renderMini();
+  renderFields();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>判定ルール｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .rule { font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 13px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; line-height: 1.9; }
+  .rgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; align-items: start; }
+  .rule { overflow-wrap: anywhere; }
+  .rgrid .card { margin: 0; }
+  ol.order li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>判定ルール</h1><div class="sub">順調／遅延の決め方、当初計画・予実・負荷の計算をまとめています。数値は現在の設定値です（<a href="settings.html">設定で変更</a>）</div></div>
+      </div>
+
+      <div class="rgrid">
+        <div class="card"><div class="card-head"><h2>1. 予定進捗率</h2></div><div class="card-body">
+          <div class="rule">予定進捗率 ＝ （今日 − 開始日 ＋ 1）÷（終了日 − 開始日 ＋ 1）<br>0%〜100% に収める</div>
+          <p class="small muted">「今日の時点で本来どこまで進んでいるはずか」。全モード共通です。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>2. 実績進捗率（判定モード）</h2></div><div class="card-body small">
+          <p><strong>自動集計</strong>：完了なら100%。子を持つなら子の加重平均（重み＝<span id="w-rule">—</span>）。子が無ければ分類から換算（未着手0%／進行中50%／保留50%／完了100%）。</p>
+          <p><strong>進捗率手入力</strong>：担当者が入れた％を使う。</p>
+          <p><strong>終了日超過のみ</strong>：終了日を過ぎて未完了なら遅延、それ以外は順調。</p>
+          <p class="muted">既定のモード：<strong id="def-mode">—</strong>（プロジェクトごとに変更可）</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>3. 健全性（上から順に判定）</h2></div><div class="card-body small">
+          <ol class="order">
+            <li>分類が完了 → <span id="b-done"></span></li>
+            <li>開始日・終了日が無い → 期間未設定</li>
+            <li>開始日より前 → <span id="b-ns"></span></li>
+            <li>終了日を過ぎて未完了 → <span id="b-dl"></span></li>
+            <li>実績 − 予定 が <strong id="th-d">—</strong>pt 未満 → 遅延</li>
+            <li>実績 − 予定 が <strong id="th-r">—</strong>pt 未満 → <span id="b-ar"></span></li>
+            <li>それ以外 → <span id="b-ok"></span></li>
+          </ol>
+          <p class="muted">親の健全性は親自身の期間で判定し、子の遅延は「配下の遅延 n件」として別に出します。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>4. 当初計画</h2></div><div class="card-body small">
+          <p>作成直後は<strong>計画中</strong>（当初比を出さない）。管理者が<strong>計画を確定</strong>した日付が第1版。以後の日付変更は「当初比 +N日」に出ます。</p>
+          <p>入力ミス・正式な計画変更は<strong>引き直し</strong>で新しい版を作ります（全体／選んだタスクだけ、理由必須）。前の版は消えず、比較する版を選べます。</p>
+          <div class="rule">当初比 ＝ いまの終了日 − 当初の終了日（＋が後ろ倒し）</div>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>5. 予実（予定と実績）</h2></div><div class="card-body small">
+          <p>実績開始日＝分類が初めて進行中／保留／完了になった日。実績終了日＝完了になった日（自動記録・手修正可）。</p>
+          <div class="rule">開始の差 ＝ 実績開始 − 予定開始<br>終了の差 ＝ 実績終了 − 予定終了（完了のみ）<br>超過 ＝ 今日 − 予定終了（未完了）<br>開始遅れ ＝ 今日 − 予定開始（未着手）</div>
+          <p class="muted">ガントは上段＝予定（枠線）、下段＝実績（塗り、進行中は▶で今日まで）。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>6. 作業の重さと負荷</h2></div><div class="card-body small">
+          <p>1件の重さ（人日）＝ 予定工数(h) ÷ <span id="hpd">—</span> ＞ サイズ（<span id="sizes">—</span>）＞ 期間からの推定。</p>
+          <div class="rule">1件の重さは、期間の稼働日（土日・祝日を除く）に均等に配る<br>稼働 ＝ 週の稼働人日（人ごと）×（稼働日 − 休み）÷ 5<br>負荷率 ＝ その週の負荷 ÷ その週の稼働</div>
+          <p class="muted">70%未満＝緑、70〜100%＝黄、100%超＝赤。祝日 <span id="hd-n">—</span>日・休み <span id="lv-n">—</span>件を登録中。</p>
+        </div></div>
+
+        <div class="card"><div class="card-head"><h2>7. 色と記号</h2></div><div class="card-body" id="palette"></div></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>キャンバスの ⑲ に対応。実装では設定画面の値を読んで表示するので、しきい値などを変えるとここも変わります。</li>
+          <li>詳しい定義は要件書の §3 にあります。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'rules', view: 'project' });
+  var s = D.settings;
+  function set(id, html) { document.getElementById(id).innerHTML = html; }
+  set('w-rule', s.rollupWeight === 'effort' ? '作業の重さ（人日）' : '期間日数');
+  set('def-mode', H.MODE_LABEL[s.defaultProgressMode]);
+  set('th-d', Math.round(s.thresholdDelayed * 100));
+  set('th-r', Math.round(s.thresholdAtRisk * 100));
+  set('b-done', U.healthBadge('done')); set('b-ns', U.healthBadge('not_started'));
+  set('b-dl', U.healthBadge('delayed')); set('b-ar', U.healthBadge('at_risk')); set('b-ok', U.healthBadge('on_track'));
+  set('hpd', s.hoursPerDay + 'h');
+  set('sizes', H.SIZE_ORDER.map(function (k) { return k + '=' + s.sizeDays[k]; }).join(' / '));
+  set('hd-n', D.holidays.length); set('lv-n', D.leaves.length);
+  set('palette', ['on_track', 'at_risk', 'delayed', 'done', 'not_started'].map(function (h) {
+    return '<div style="display:flex;align-items:center;gap:10px;padding:5px 0">' + U.healthBadge(h) +
+      '<span class="small muted">' + ({ on_track: '予定どおり', at_risk: '少し遅れ', delayed: '大きく遅れ／終了日超過', done: '完了', not_started: '開始前' })[h] + '</span></div>';
+  }).join('') + '<p class="small muted">色だけに頼らず、記号（● ▲ ! ✓ ・）も必ず併記します。</p>');
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>リスト｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .grp-head { padding: 9px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  input.rate { width: 62px; text-align: right; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb"></div>
+      <div class="page-head">
+        <div><h1 id="p-name">—</h1><div class="sub">行から直接ステータスと進捗率を変えられます</div></div>
+        <span class="spacer"></span>
+        <div class="filters">
+          <label class="small muted" for="f-group">まとめ方</label>
+          <select class="inline" id="f-group">
+            <option value="status">ステータス</option>
+            <option value="assignee">担当者</option>
+            <option value="type">種別</option>
+            <option value="none">まとめない</option>
+          </select>
+          <label class="small muted"><input type="checkbox" id="f-delayed"> 遅延だけ</label>
+        </div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+
+      <div class="card">
+        <div class="card-head"><h2>タスク</h2><span class="tag" id="count">—</span><span class="spacer"></span><a class="btn sm" id="btn-add" href="task-edit.html">＋ タスクを追加</a></div>
+        <div class="card-body tight" id="list"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-16（リスト・まとめ方の切替）／F-3-9（遅延だけ表示）</li>
+          <li>進捗率を入れられるのは<strong>子を持たないタスクだけ</strong>です。親タスクの欄はうす字で、子の平均が出ます。</li>
+          <li>まとめ方を「担当者」にすると、1つのタスクが1か所にだけ出ます（複数人の担当は持たせない方針）。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+
+  var project = U.currentProject();
+  U.projectTabs(project, 'list');
+  document.getElementById('p-name').textContent = project.name;
+  document.getElementById('btn-add').href = 'task-edit.html?project=' + project.projectId;
+
+  ['f-group', 'f-delayed'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+
+  // 列幅は固定。グループごとに表を分けても、列の位置がそろうようにする
+  var COLS = '<colgroup>' +
+    '<col><col style="width:132px"><col style="width:150px">' +
+    '<col class="col-hide" style="width:230px"><col class="col-hide" style="width:118px">' +
+    '<col style="width:132px"></colgroup>';
+
+  function render() {
+    var tree = H.evaluateTree(project, D.itemsOf(project.projectId), D.ctx());
+    var rows = H.flatten(tree);
+    if (document.getElementById('f-delayed').checked) {
+      rows = rows.filter(function (r) { return r.calc.health === 'delayed'; });
+    }
+    document.getElementById('count').textContent = rows.length + ' 件';
+
+    var mode = document.getElementById('f-group').value;
+    var groups;
+    if (mode === 'status') {
+      groups = H.STATUS_ORDER.map(function (s) {
+        return { label: H.STATUS_LABEL[s], rows: rows.filter(function (r) { return r.node.status === s; }) };
+      });
+    } else if (mode === 'assignee') {
+      groups = D.users.map(function (u) {
+        return { label: u.name, rows: rows.filter(function (r) { return r.node.assigneeUserId === u.userId; }) };
+      }).concat([{ label: '未アサイン', rows: rows.filter(function (r) { return !r.node.assigneeUserId; }) }]);
+    } else if (mode === 'type') {
+      groups = ['work', 'bug', 'req'].map(function (t) {
+        return { label: H.TYPE_LABEL[t], rows: rows.filter(function (r) { return r.node.itemType === t; }) };
+      });
+    } else {
+      groups = [{ label: null, rows: rows }];
+    }
+    groups = groups.filter(function (g) { return g.rows.length; });
+
+    var el = document.getElementById('list');
+    if (!groups.length) { el.innerHTML = '<div class="empty">該当するタスクがありません</div>'; return; }
+
+    el.innerHTML = groups.map(function (g) {
+      return (g.label ? '<div class="grp-head">' + U.esc(g.label) + '<span class="tag">' + g.rows.length + '</span></div>' : '') +
+        '<table class="tbl fixed">' + COLS +
+        '<thead><tr><th>タスク</th><th>ステータス</th><th>進捗</th>' +
+        '<th class="col-hide">期間</th><th class="col-hide">期限</th><th>担当</th></tr></thead><tbody>' +
+        g.rows.map(line).join('') + '</tbody></table>';
+    }).join('');
+
+    el.querySelectorAll('select[data-id]').forEach(function (s) {
+      s.addEventListener('change', function () {
+        var item = D.itemById(this.getAttribute('data-id'));
+        item.status = this.value;
+        if (this.value === 'done' && item.progressRate !== null) item.progressRate = 100;
+        render();
+      });
+    });
+    el.querySelectorAll('input.rate').forEach(function (i) {
+      i.addEventListener('change', function () {
+        var item = D.itemById(this.getAttribute('data-id'));
+        item.progressRate = Math.max(0, Math.min(100, Number(this.value) || 0));
+        render();
+      });
+    });
+  }
+
+  function line(r) {
+    var n = r.node, c = r.calc;
+    var parent = n.parentItemId ? D.itemById(n.parentItemId) : null;
+    var rateCell = c.hasChildren
+      ? '<span class="faint num" title="子の平均。手入力できません">' + Math.round(c.actualRate * 100) + '%</span>'
+      : '<input class="rate" type="number" min="0" max="100" step="5" data-id="' + n.itemId +
+        '" value="' + Math.round(c.actualRate * 100) + '" aria-label="進捗率">';
+    return '<tr>' +
+      '<td>' + U.taskCell(n, { parent: true }) + '</td>' +
+      '<td><select class="inline" data-id="' + n.itemId + '" aria-label="ステータス">' +
+        H.STATUS_ORDER.map(function (s) {
+          return '<option value="' + s + '"' + (s === n.status ? ' selected' : '') + '>' + H.STATUS_LABEL[s] + '</option>';
+        }).join('') + '</select></td>' +
+      '<td style="white-space:nowrap">' + rateCell + ' ' + U.healthBadge(c.health) + '</td>' +
+      '<td class="col-hide small">' + U.periodText(n.startDate, n.endDate) + '</td>' +
+      '<td class="col-hide small">' + U.dueText(c) + '</td>' +
+      '<td class="small">' + U.assignee(n.assigneeUserId) + '</td>' +
+    '</tr>';
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設定｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .sw-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); }
+  .sw-row:first-child { border-top: none; }
+  .sw-row .t { flex: 1; min-width: 0; }
+  .demo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>設定</h1><div class="sub">システム全体の値です。変えると全プロジェクトの判定に効きます</div></div>
+      </div>
+
+      <div class="tabs" id="tabs" style="margin-bottom:14px"></div>
+
+      <!-- 判定 -->
+      <section data-pane="judge">
+        <div class="card">
+          <div class="card-head"><h2>対応中・遅延の決め方</h2></div>
+          <div class="card-body">
+            <p class="small muted">簡易版では<strong>設定できる値はありません</strong>。次の決まりで固定です。</p>
+            <ol style="font-size: 15px;line-height:2;padding-left:20px;margin:0">
+              <li>ステータスが完了 → <span id="b-done"></span></li>
+              <li><strong>終了日を過ぎて未完了</strong> → <span id="b-dl"></span></li>
+              <li>開始日・終了日が無い → <span id="b-np"></span></li>
+              <li>開始日より前 → <span id="b-ns"></span></li>
+              <li>それ以外 → <span id="b-ok"></span></li>
+            </ol>
+            <div class="callout small" style="margin-top:14px">
+              <strong>進捗率は判定に使いません。</strong>入力が滞っても判定がぶれない代わりに、
+              終了日が来るまでは遅れかけていても「対応中」のままです。
+              進み具合は、一覧の進捗バーに重なる縦線（予定進捗）で見ます。
+            </div>
+            <p class="small muted" style="margin-top:12px">
+              完全版にあった「実績 − 予定 が −10pt で注意、−25pt で遅延」というしきい値の判定は、簡易版では行いません。
+              そのため<strong>「注意」（黄色）はありません</strong>。詳しくは <a href="rules.html">判定ルール</a>。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ユーザー -->
+      <section data-pane="users" hidden>
+        <div class="card">
+          <div class="card-head"><h2>ユーザー</h2><span class="tag" id="u-count">—</span></div>
+          <div class="card-body tight" id="users"></div>
+        </div>
+        <div class="mock-note">
+          <h4>メモ</h4>
+          <ul>
+            <li>ログインは Google アカウントです。ここのメールアドレスと突き合わせて本人を決めます。</li>
+            <li>無効にした人は、担当者の選択肢に出なくなります。過去の担当履歴は残ります。</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- お知らせ -->
+      <section data-pane="notify" hidden>
+        <div class="card">
+          <div class="card-head"><h2>お知らせの種類</h2></div>
+          <div class="card-body">
+            <p class="small muted">ヘッダーのベルに出すお知らせを、種類ごとに切り替えます。</p>
+            <div id="notify"></div>
+            <div class="field" style="margin-top:16px">
+              <label for="f-keep">お知らせを残す日数</label>
+              <input id="f-keep" type="number" min="7" max="365" style="width:120px">
+              <div class="help">これより古いものは毎朝まとめて消します</div>
+            </div>
+            <div class="callout small">
+              メール・チャットへの送信は行いません（スコープ外）。画面の中だけで知らせます。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-1（ユーザー）／F-5-9（お知らせの種類）</li>
+          <li>完全版にあった「判定モードの既定値」「注意／遅延のしきい値」「作業の重さ」「週の稼働」「休み・祝日」「ラベル」は、簡易版では機能ごと無くなっています。判定タブは読むだけです。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'settings', view: 'project' });
+
+  var PANES = [['judge', '判定'], ['users', 'ユーザー'], ['notify', 'お知らせ']];
+  var cur = 'judge';
+  function renderTabs() {
+    document.getElementById('tabs').innerHTML = PANES.map(function (p) {
+      return '<button class="' + (p[0] === cur ? 'active' : '') + '" data-p="' + p[0] + '">' + p[1] + '</button>';
+    }).join('');
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        cur = this.getAttribute('data-p');
+        document.querySelectorAll('section[data-pane]').forEach(function (s) {
+          s.hidden = s.getAttribute('data-pane') !== cur;
+        });
+        renderTabs();
+      });
+    });
+  }
+  renderTabs();
+
+  // ---- 判定（読むだけ） ----
+  [['b-done','done'],['b-dl','delayed'],['b-np','no_period'],['b-ns','not_started'],['b-ok','on_track']]
+    .forEach(function (p) { document.getElementById(p[0]).innerHTML = U.healthBadge(p[1]); });
+
+  // ---- ユーザー ----
+  document.getElementById('u-count').textContent = D.users.length + ' 人';
+  document.getElementById('users').innerHTML =
+    '<table class="tbl"><thead><tr><th>氏名</th><th class="col-hide">メール</th><th>ロール</th><th class="c">有効</th></tr></thead><tbody>' +
+    D.users.map(function (u) {
+      return '<tr><td>' + U.avatar(u.userId) + ' <strong>' + U.esc(u.name) + '</strong></td>' +
+        '<td class="col-hide small muted">' + U.esc(u.email) + '</td>' +
+        '<td><select class="inline" aria-label="ロール">' +
+          '<option' + (u.role === 'admin' ? ' selected' : '') + '>管理者</option>' +
+          '<option' + (u.role === 'member' ? ' selected' : '') + '>担当者</option></select></td>' +
+        '<td class="c"><input type="checkbox"' + (u.active ? ' checked' : '') + ' aria-label="有効"></td></tr>';
+    }).join('') + '</tbody></table>';
+
+  // ---- お知らせ ----
+  var NOTI = [
+    ['notifyAssign', '担当になった／外れた', 'タスクの担当者を変えたとき、その場で新旧の人に出します'],
+    ['notifyDue', '期限の前日と当日', '毎朝まとめて作ります'],
+    ['notifyDelayed', '遅延になった', '前日は遅延でなかったタスクが遅延になったときだけ出します']
+  ];
+  document.getElementById('notify').innerHTML = NOTI.map(function (n) {
+    return '<div class="sw-row"><input type="checkbox" id="' + n[0] + '"' + (s[n[0]] ? ' checked' : '') + '>' +
+      '<div class="t"><label for="' + n[0] + '"><strong>' + n[1] + '</strong></label>' +
+      '<div class="small muted">' + n[2] + '</div></div></div>';
+  }).join('');
+  NOTI.forEach(function (n) {
+    document.getElementById(n[0]).addEventListener('change', function () { s[n[0]] = this.checked; });
+  });
+  var keep = document.getElementById('f-keep');
+  keep.value = s.notifyKeepDays;
+  keep.addEventListener('change', function () { s.notifyKeepDays = Number(this.value); });
+})();
+</script>
+</body>
+</html>

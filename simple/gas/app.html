@@ -1,0 +1,769 @@
+<script>
+/**
+ * 画面の組み立て（簡易版）
+ *
+ * 読み込みは2段階（要件書 §5.1）
+ *   ① getBootstrap() … プロジェクト一覧をすぐ描く
+ *   ② getItems()     … タスク全件を裏で読む。終わるまでは「読み込み中」と出す
+ * 以降の絞り込み・画面の切り替えはブラウザの中だけで走る。
+ */
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------- 状態
+  var S = {
+    today: '', me: null, users: [], projects: [], summary: {}, templates: [], settings: {},
+    items: null,              // null = まだ読み込み中
+    view: 'projects', projectId: null, tab: 'overview',
+    collapsed: {}, unread: 0
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function userName(id) {
+    for (var i = 0; i < S.users.length; i++) if (S.users[i].user_id === id) return S.users[i].name;
+    return '';
+  }
+  function project(id) {
+    for (var i = 0; i < S.projects.length; i++) if (S.projects[i].project_id === id) return S.projects[i];
+    return null;
+  }
+  function itemsOf(pid) {
+    return (S.items || []).filter(function (x) { return x.project_id === pid; });
+  }
+  function itemById(id) {
+    for (var i = 0; i < (S.items || []).length; i++) if (S.items[i].item_id === id) return S.items[i];
+    return null;
+  }
+
+  // ---------------------------------------------------------------- 起動
+  function boot() {
+    google.script.run
+      .withSuccessHandler(function (d) {
+        S.today = d.today; S.me = d.me; S.users = d.users; S.projects = d.projects;
+        S.templates = d.templates; S.settings = d.settings; S.unread = d.unread;
+        d.summary.forEach(function (s) { S.summary[s.project_id] = s; });
+        $('today').textContent = '今日 ' + d.today;
+        $('me').textContent = d.me ? d.me.name : '未登録';
+        $('bell-dot').hidden = !d.unread;
+        renderNav();
+        render();
+        loadItems();                       // ② 裏で読む。画面はもう出ている
+      })
+      .withFailureHandler(fail)
+      .getBootstrap();
+  }
+
+  function loadItems() {
+    google.script.run
+      .withSuccessHandler(function (items) { S.items = items; render(); })
+      .withFailureHandler(fail)
+      .getItems();
+  }
+
+  function fail(err) {
+    toast(err && err.message ? err.message : String(err), true);
+    var m = $('main');
+    if (m.querySelector('.loading')) m.innerHTML = '<div class="empty">読み込めませんでした。' + esc(String(err)) + '</div>';
+  }
+
+  var toastTimer = null;
+  function toast(msg, isErr) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast' + (isErr ? ' err' : '');
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, isErr ? 6000 : 2600);
+  }
+
+  // ---------------------------------------------------------------- ナビ
+  var NAV = [
+    { group: 'プロジェクト単位' },
+    { key: 'projects', ico: '▤', label: 'プロジェクト一覧', short: '一覧' },
+    { key: 'search', ico: '⌕', label: '横断検索', short: '検索' },
+    { key: 'new', ico: '＋', label: 'プロジェクト作成' },
+    { group: '担当者単位' },
+    { key: 'people', ico: '▥', label: '担当者一覧', short: '担当者' },
+    { key: 'mine', ico: '☑', label: 'マイタスク', short: 'マイタスク' },
+    { group: '管理' },
+    { key: 'notifications', ico: '🔔', label: 'お知らせ', short: 'お知らせ' }
+  ];
+
+  function renderNav() {
+    $('sidebar').innerHTML = NAV.map(function (n) {
+      if (n.group) return '<div class="group">' + esc(n.group) + '</div>';
+      return '<a data-nav="' + n.key + '"' + (n.key === S.view ? ' class="active"' : '') + '>' +
+        '<span class="ico" aria-hidden="true">' + n.ico + '</span>' +
+        '<span class="lbl">' + esc(n.label) + '</span>' +
+        '<span class="short">' + esc(n.short || n.label) + '</span></a>';
+    }).join('');
+  }
+
+  document.addEventListener('click', function (e) {
+    var nav = e.target.closest('[data-nav]');
+    if (nav) { go(nav.getAttribute('data-nav')); return; }
+    var open = e.target.closest('[data-project]');
+    if (open) { S.projectId = open.getAttribute('data-project'); go('detail'); return; }
+    var tab = e.target.closest('[data-tab]');
+    if (tab) { S.tab = tab.getAttribute('data-tab'); render(); return; }
+    var edit = e.target.closest('[data-edit]');
+    if (edit) { openTaskEditor(edit.getAttribute('data-edit'), null); return; }
+    var add = e.target.closest('[data-add]');
+    if (add) { openTaskEditor(null, add.getAttribute('data-add')); return; }
+    var tg = e.target.closest('[data-toggle]');
+    if (tg) { var k = tg.getAttribute('data-toggle'); S.collapsed[k] = !S.collapsed[k]; render(); return; }
+  });
+
+  $('btn-bell').addEventListener('click', function () { go('notifications'); });
+
+  function go(view) {
+    S.view = view;
+    if (view !== 'detail') S.projectId = null;
+    renderNav();
+    render();
+    window.scrollTo(0, 0);
+  }
+
+  // ---------------------------------------------------------------- 描画
+  function render() {
+    var m = $('main');
+    if (S.view === 'projects') m.innerHTML = viewProjects();
+    else if (S.view === 'detail') m.innerHTML = viewDetail();
+    else if (S.view === 'mine') m.innerHTML = viewMine();
+    else if (S.view === 'people') m.innerHTML = viewPeople();
+    else if (S.view === 'search') m.innerHTML = viewSearch();
+    else if (S.view === 'new') m.innerHTML = viewNew();
+    else if (S.view === 'notifications') { m.innerHTML = '<div class="loading">読み込んでいます…</div>'; loadNotifications(); }
+    wireInputs();
+  }
+
+  function loadingNote() {
+    return S.items === null
+      ? '<div class="empty">タスクを読み込んでいます…</div>' : '';
+  }
+
+  function badge(h) {
+    return '<span class="badge ' + h + '"><span aria-hidden="true">' + H.HEALTH_ICON[h] + '</span>' + H.HEALTH_LABEL[h] + '</span>';
+  }
+  function typeChip(t) {
+    var cls = t === 'bug' ? ' bug' : (t === 'req' ? ' req' : '');
+    return '<span class="chip' + cls + '">' + (H.TYPE_LABEL[t] || '作業') + '</span>';
+  }
+  function progBar(calc) {
+    var a = Math.round((calc.actualRate || 0) * 100);
+    var marker = calc.plannedRate === null || calc.plannedRate === undefined ? ''
+      : '<span class="planned" style="left:' + (calc.plannedRate * 100).toFixed(1) + '%"></span>';
+    return '<div class="prog-wrap"><div class="prog ' + calc.health + '">' +
+      '<div class="fill" style="width:' + a + '%"></div>' + marker + '</div>' +
+      '<span class="pct">' + a + '%</span></div>';
+  }
+  function dueText(calc) {
+    if (calc.health === 'done') return '<span class="faint">済み</span>';
+    if (calc.remainingDays === null) return '<span class="faint">—</span>';
+    if (calc.overDays > 0) return '<span class="late">超過+' + calc.overDays + '日</span>';
+    if (calc.remainingDays === 0) return '<span class="late">今日期限</span>';
+    if (calc.remainingDays < 0) return '<span class="faint">—</span>';
+    return '<span class="num faint">あと ' + calc.remainingDays + ' 日</span>';
+  }
+  function periodText(s, e) {
+    if (!s || !e) return '<span class="faint">期間未設定</span>';
+    return '<span class="num">' + H.formatDate(s) + ' 〜 ' + H.formatDate(e) + '</span> <span class="faint">' + H.durationDays(s, e) + '日</span>';
+  }
+  function assignee(id) {
+    return id ? '<span class="who">' + esc(userName(id)) + '</span>' : '<span class="who none">未アサイン</span>';
+  }
+
+  // ---- ① プロジェクト一覧 ----
+  function viewProjects() {
+    var delayedTasks = 0, pjWithDelay = 0, open = 0, notStarted = 0, done = 0;
+    S.projects.forEach(function (p) {
+      var c = S.summary[p.project_id] || {};
+      if (c.delayed_count > 0) { delayedTasks += c.delayed_count; pjWithDelay++; }
+      if (c.health === 'not_started') notStarted++;
+      else if (c.health === 'done' || p.status === 'done') done++;
+      else open++;
+    });
+
+    var rows = S.projects.slice().sort(function (a, b) {
+      var ca = S.summary[a.project_id] || {}, cb = S.summary[b.project_id] || {};
+      return (cb.delayed_count || 0) - (ca.delayed_count || 0);
+    }).map(function (p) {
+      var c = S.summary[p.project_id] || { health: 'no_period', actual_rate: 0, planned_rate: 0, delayed_count: 0 };
+      var calc = {
+        actualRate: (c.actual_rate || 0) / 100,
+        plannedRate: (c.planned_rate || 0) / 100,
+        health: c.health || 'no_period',
+        remainingDays: p.end_date ? H.diffDays(S.today, p.end_date) : null,
+        overDays: 0
+      };
+      if (calc.remainingDays !== null && calc.remainingDays < 0 && p.status !== 'done') calc.overDays = -calc.remainingDays;
+      return '<tr>' +
+        '<td><div class="cell"><a class="t" data-project="' + esc(p.project_id) + '">' + esc(p.name) + '</a>' +
+          '<span class="s">' + esc(p.key) + ' ・ ' + esc(p.template_name || 'テンプレートなし') +
+          (c.delayed_count > 0 ? ' ・ <span class="late">配下の遅延 ' + c.delayed_count + '件</span>' : '') + '</span></div></td>' +
+        '<td>' + badge(calc.health) + '</td>' +
+        '<td>' + progBar(calc) + '</td>' +
+        '<td class="col-hide">' + dueText(calc) + '</td>' +
+        '<td class="col-hide"><span class="who">' + esc(userName(p.owner_user_id)) + '</span></td>' +
+      '</tr>';
+    }).join('');
+
+    return head('プロジェクト一覧',
+        delayedTasks ? '<span class="late">遅延しているタスクが ' + delayedTasks + ' 件</span>あります（' + pjWithDelay + ' プロジェクト）'
+                     : '遅れているタスクはありません',
+        '<button class="btn primary" data-nav="new">＋ プロジェクトを作成</button>') +
+      '<div class="toolbar"><span class="label">対応中</span><span class="count">' + open + ' 件</span>' +
+        '<span class="label">開始前</span><span class="count">' + notStarted + ' 件</span>' +
+        '<span class="label">完了</span><span class="count">' + done + ' 件</span>' +
+        '<span class="spacer"></span><span class="count">プロジェクト ' + S.projects.length + ' 件</span></div>' +
+      '<section class="card"><div class="tbl-wrap">' +
+        (S.projects.length
+          ? '<table class="tbl"><colgroup><col><col style="width:128px"><col style="width:190px">' +
+            '<col class="col-hide" style="width:128px"><col class="col-hide" style="width:140px"></colgroup>' +
+            '<thead><tr><th>プロジェクト</th><th>状態</th><th>進捗</th>' +
+            '<th class="col-hide">期限まで</th><th class="col-hide">オーナー</th></tr></thead><tbody>' + rows + '</tbody></table>'
+          : '<div class="empty">プロジェクトがありません。「＋ プロジェクトを作成」から作ってください</div>') +
+      '</div></section>';
+  }
+
+  function head(title, sub, actions) {
+    return '<div class="page-head"><div style="min-width:0">' +
+      '<h1>' + esc(title) + '</h1>' + (sub ? '<div class="sub">' + sub + '</div>' : '') +
+      '</div><span class="spacer"></span>' + (actions || '') + '</div>';
+  }
+
+  // ---- ③ プロジェクト詳細 ----
+  function viewDetail() {
+    var p = project(S.projectId);
+    if (!p) return '<div class="empty">プロジェクトが見つかりません</div>';
+    if (S.items === null) {
+      return '<div class="breadcrumb"><a data-nav="projects">プロジェクト一覧</a> ／ ' + esc(p.name) + '</div>' +
+        head(p.name, esc(p.key) + ' ・ ' + esc(p.template_name || 'テンプレートなし'), '') +
+        '<div class="empty">タスクを読み込んでいます…</div>';
+    }
+
+    var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
+    var c = tree.calc;
+    var subTotal = 0, subDone = 0;
+    tree.children.forEach(function (t) { subTotal += t.children.length; subDone += t.calc.doneCount; });
+
+    var rows = '';
+    tree.children.forEach(function (t) {
+      rows += treeRow(t, 1, t.children.length > 0);
+      if (!S.collapsed[t.node.item_id]) t.children.forEach(function (s) { rows += treeRow(s, 2, false); });
+    });
+
+    return '<div class="breadcrumb"><a data-nav="projects">プロジェクト一覧</a> ／ ' + esc(p.name) + '</div>' +
+      head(p.name, esc(p.key) + ' ・ ' + esc(p.template_name || 'テンプレートなし') + ' ・ ' + esc(userName(p.owner_user_id)),
+        '<button class="btn primary" data-add="' + esc(p.project_id) + '">＋ タスクを追加</button>') +
+      '<div class="tabs">' +
+        '<button data-tab="overview"' + (S.tab === 'overview' ? ' class="active"' : '') + '>概要</button>' +
+        '<button data-tab="settings"' + (S.tab === 'settings' ? ' class="active"' : '') + '>設定</button>' +
+      '</div>' +
+      (S.tab === 'settings' ? projectSettings(p) :
+        '<div class="toolbar">' +
+          '<span class="label">進捗</span><span class="count">' + H.pct(c.actualRate) + '</span>' +
+          '<span class="label">予定</span><span class="count">' + H.pct(c.plannedRate) + '（参考）</span>' +
+          '<span class="label">期限まで</span><span class="count">' + dueText(c) + '</span>' +
+          '<span class="spacer"></span>' +
+          '<span class="count">タスク ' + c.doneCount + ' / ' + c.childCount + ' 完了（子 ' + subDone + ' / ' + subTotal + '）</span>' +
+        '</div>' +
+        '<section class="card"><div class="tbl-wrap">' +
+          '<div class="tree-row head"><div>タスク</div><div>状態</div><div class="col-hide">進捗</div>' +
+          '<div class="col-hide">担当</div><div class="col-hide">期限</div></div>' +
+          (rows || '<div class="empty">タスクがありません</div>') +
+        '</div></section>');
+  }
+
+  function treeRow(n, level, hasKids) {
+    var node = n.node, calc = n.calc;
+    return '<div class="tree-row lv' + level + '">' +
+      '<div class="name">' +
+        (level === 1
+          ? '<button class="toggle" data-toggle="' + esc(node.item_id) + '" aria-label="開閉">' +
+            (hasKids ? (S.collapsed[node.item_id] ? '▸' : '▾') : '') + '</button>'
+          : '') +
+        typeChip(node.item_type) +
+        '<span class="link" data-edit="' + esc(node.item_id) + '">' + esc(node.name) + '</span>' +
+        (calc.delayedInside > 0 ? ' <span class="late">配下 ' + calc.delayedInside + '</span>' : '') +
+      '</div>' +
+      '<div>' + badge(calc.health) + '</div>' +
+      '<div class="col-hide">' + progBar(calc) + '</div>' +
+      '<div class="col-hide">' + assignee(node.assignee_user_id) + '</div>' +
+      '<div class="col-hide">' + dueText(calc) + '</div>' +
+    '</div>';
+  }
+
+  // ---- ⑭ マイタスク ----
+  var DUE_LABEL = { delayed: '遅延', today: '今日期限', week: '今週', later: '以降', done: '完了済み' };
+  function dueGroup(node, calc) {
+    if (node.status === 'done') return 'done';
+    if (!node.end_date) return 'later';
+    var d = H.diffDays(S.today, node.end_date);
+    if (d < 0) return 'delayed';
+    if (d === 0) return 'today';
+    if (d <= 7) return 'week';
+    return 'later';
+  }
+
+  function myUnits() {
+    var out = [];
+    if (S.items === null || !S.me) return out;
+    S.projects.forEach(function (p) {
+      var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
+      H.flatten(tree).forEach(function (r) {
+        if (r.calc.hasChildren) return;
+        if (r.node.assignee_user_id !== S.me.user_id) return;
+        out.push({ node: r.node, calc: r.calc, project: p, group: dueGroup(r.node, r.calc) });
+      });
+    });
+    return out;
+  }
+
+  function viewMine() {
+    if (S.items === null) return head('マイタスク', '', '') + '<div class="empty">タスクを読み込んでいます…</div>';
+    var mine = myUnits();
+    var order = ['delayed', 'today', 'week', 'later', 'done'];
+    var by = {};
+    order.forEach(function (k) { by[k] = mine.filter(function (m) { return m.group === k; }); });
+    var tab = order.indexOf(S.tab) >= 0 ? S.tab : 'delayed';
+
+    var rows = by[tab].map(function (m) {
+      return '<tr>' +
+        '<td><div class="cell">' + typeChip(m.node.item_type) +
+          ' <a class="t" data-edit="' + esc(m.node.item_id) + '" style="display:inline">' + esc(m.node.name) + '</a>' +
+          '<span class="s">' + esc(m.node.item_key) + ' ・ ' + esc(m.project.key) + ' ' + esc(m.project.name) + '</span></div></td>' +
+        '<td class="col-hide">' + periodText(m.node.start_date, m.node.end_date) + '</td>' +
+        '<td>' + progBar(m.calc) + '</td>' +
+        '<td>' + dueText(m.calc) + '</td>' +
+        '<td>' + badge(m.calc.health) + '</td></tr>';
+    }).join('');
+
+    return head((S.me ? S.me.name + ' さんのタスク' : 'マイタスク'),
+        'アサインされたタスクを、プロジェクトをまたいで期限順に並べています', '') +
+      '<div class="tabs">' + order.map(function (k) {
+        return '<button data-tab="' + k + '"' + (k === tab ? ' class="active"' : '') + '>' +
+          DUE_LABEL[k] + ' ' + by[k].length + '</button>';
+      }).join('') + '</div>' +
+      '<div class="toolbar"><span class="spacer"></span><span class="count">タスク ' + by[tab].length + ' 件</span></div>' +
+      '<section class="card"><div class="tbl-wrap">' +
+        (by[tab].length
+          ? '<table class="tbl"><colgroup><col><col class="col-hide" style="width:240px"><col style="width:180px">' +
+            '<col style="width:128px"><col style="width:120px"></colgroup>' +
+            '<thead><tr><th>タスク</th><th class="col-hide">期間</th><th>進捗</th><th>期限</th><th>状態</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody></table>'
+          : '<div class="empty">この区分のタスクはありません</div>') +
+      '</div></section>';
+  }
+
+  // ---- ⑪ 担当者一覧 ----
+  function viewPeople() {
+    if (S.items === null) return head('担当者一覧', '', '') + '<div class="empty">タスクを読み込んでいます…</div>';
+    var units = [];
+    S.projects.forEach(function (p) {
+      var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
+      H.flatten(tree).forEach(function (r) {
+        if (r.calc.hasChildren) return;
+        units.push({ node: r.node, calc: r.calc, project: p });
+      });
+    });
+
+    function stats(uid) {
+      var mine = units.filter(function (u) {
+        return uid === null ? !u.node.assignee_user_id : u.node.assignee_user_id === uid;
+      });
+      var open = mine.filter(function (u) { return u.node.status !== 'done'; });
+      var pids = {};
+      open.forEach(function (u) { pids[u.project.project_id] = true; });
+      return {
+        open: open.length, done: mine.length - open.length,
+        delayed: open.filter(function (u) { return u.calc.health === 'delayed'; }).length,
+        today: open.filter(function (u) { return dueGroup(u.node, u.calc) === 'today'; }).length,
+        pj: Object.keys(pids).length
+      };
+    }
+
+    var list = S.users.map(function (u) { return { name: u.name, mail: u.email, s: stats(u.user_id) }; });
+    var none = stats(null);
+    if (none.open + none.done > 0) list.push({ name: '未アサイン', mail: '担当を決める必要があります', s: none, none: true });
+    list.sort(function (a, b) { return b.s.delayed - a.s.delayed || b.s.open - a.s.open; });
+
+    var rows = list.map(function (r) {
+      return '<tr>' +
+        '<td><div class="cell"><span class="t"' + (r.none ? ' style="color:var(--text-faint)"' : '') + '>' + esc(r.name) + '</span>' +
+          '<span class="s">' + esc(r.mail) + '</span></div></td>' +
+        '<td class="r num">' + r.s.open + '</td>' +
+        '<td class="r num">' + (r.s.delayed ? '<span class="late">' + r.s.delayed + '</span>' : '<span class="faint">0</span>') + '</td>' +
+        '<td class="r num col-hide">' + r.s.today + '</td>' +
+        '<td class="r num col-hide faint">' + r.s.done + '</td>' +
+        '<td class="r num">' + r.s.pj + '</td></tr>';
+    }).join('');
+
+    return head('担当者一覧', '誰にどれだけ溜まっているかを件数で見ます', '') +
+      '<div class="toolbar"><span class="spacer"></span><span class="count">担当者 ' + S.users.length + ' 人</span></div>' +
+      '<section class="card"><div class="tbl-wrap">' +
+        '<table class="tbl"><colgroup><col><col style="width:110px"><col style="width:100px">' +
+        '<col class="col-hide" style="width:118px"><col class="col-hide" style="width:100px"><col style="width:118px"></colgroup>' +
+        '<thead><tr><th>担当者</th><th class="r">未完了</th><th class="r">遅延</th>' +
+        '<th class="r col-hide">今日期限</th><th class="r col-hide">完了</th><th class="r">関わるPJ</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table>' +
+      '</div></section>';
+  }
+
+  // ---- ⑩ 横断検索 ----
+  var searchState = { text: '', pj: '', who: '', status: '' };
+  function viewSearch() {
+    if (S.items === null) return head('横断検索', '', '') + '<div class="empty">タスクを読み込んでいます…</div>';
+    var all = [];
+    S.projects.forEach(function (p) {
+      var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
+      H.flatten(tree).forEach(function (r) { all.push({ node: r.node, calc: r.calc, project: p }); });
+    });
+
+    var q = searchState.text.trim().toLowerCase();
+    var rows = all.filter(function (r) {
+      var n = r.node;
+      if (q && (n.name + ' ' + n.item_key).toLowerCase().indexOf(q) < 0) return false;
+      if (searchState.pj && n.project_id !== searchState.pj) return false;
+      if (searchState.who === '@none' ? !!n.assignee_user_id : (searchState.who && n.assignee_user_id !== searchState.who)) return false;
+      if (searchState.status && n.status !== searchState.status) return false;
+      return true;
+    });
+
+    var body = rows.map(function (r) {
+      return '<tr>' +
+        '<td><div class="cell">' + typeChip(r.node.item_type) +
+          ' <a class="t" data-edit="' + esc(r.node.item_id) + '" style="display:inline">' + esc(r.node.name) + '</a>' +
+          '<span class="s">' + esc(r.node.item_key) + ' ・ ' + H.STATUS_LABEL[r.node.status] + '</span></div></td>' +
+        '<td class="col-hide"><span class="who">' + esc(r.project.name) + '</span></td>' +
+        '<td>' + badge(r.calc.health) + '</td>' +
+        '<td class="col-hide">' + dueText(r.calc) + '</td>' +
+        '<td>' + assignee(r.node.assignee_user_id) + '</td></tr>';
+    }).join('');
+
+    return head('横断検索', '全プロジェクトのタスクをまとめて探します', '') +
+      '<div class="toolbar">' +
+        '<input class="inline" id="s-text" type="search" placeholder="タスク名・キーで探す" value="' + esc(searchState.text) + '" style="flex:1 1 240px">' +
+        '<span class="label">プロジェクト</span>' +
+        '<select class="inline" id="s-pj">' + optionList([['', 'すべて']].concat(
+          S.projects.map(function (p) { return [p.project_id, p.name]; })), searchState.pj) + '</select>' +
+        '<span class="label">担当者</span>' +
+        '<select class="inline" id="s-who">' + optionList([['', 'すべて'], ['@none', '未アサイン']].concat(
+          S.users.map(function (u) { return [u.user_id, u.name]; })), searchState.who) + '</select>' +
+        '<span class="spacer"></span><span class="count">見つかったタスク ' + rows.length + ' 件</span>' +
+      '</div>' +
+      '<section class="card"><div class="tbl-wrap">' +
+        (rows.length
+          ? '<table class="tbl"><colgroup><col><col class="col-hide" style="width:230px"><col style="width:120px">' +
+            '<col class="col-hide" style="width:128px"><col style="width:140px"></colgroup>' +
+            '<thead><tr><th>タスク</th><th class="col-hide">プロジェクト</th><th>状態</th>' +
+            '<th class="col-hide">期限</th><th>担当</th></tr></thead><tbody>' + body + '</tbody></table>'
+          : '<div class="empty">条件に合うタスクがありません</div>') +
+      '</div></section>';
+  }
+
+  function optionList(pairs, cur) {
+    return pairs.map(function (p) {
+      return '<option value="' + esc(p[0]) + '"' + (String(p[0]) === String(cur) ? ' selected' : '') + '>' + esc(p[1]) + '</option>';
+    }).join('');
+  }
+
+  function wireInputs() {
+    var t = $('s-text');
+    if (t) {
+      t.addEventListener('input', function () { searchState.text = this.value; var p = this.selectionStart; render(); var n = $('s-text'); if (n) { n.focus(); n.setSelectionRange(p, p); } });
+    }
+    ['s-pj', 's-who'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.addEventListener('change', function () { searchState[id.slice(2)] = this.value; render(); });
+    });
+  }
+
+  // ---- ⑨ プロジェクト作成 ----
+  function viewNew() {
+    return head('プロジェクトを作成', 'テンプレートを選ぶと、配下のタスクが自動で作られます', '') +
+      '<section class="card"><div class="card-body" style="max-width:620px">' +
+        '<div class="field"><label for="n-name">プロジェクト名</label><input id="n-name" type="text" placeholder="例：コーポレートサイトリニューアル"></div>' +
+        '<div class="row2">' +
+          '<div class="field"><label for="n-tpl">テンプレート</label><select id="n-tpl">' +
+            optionList([['', 'テンプレートを使わない']].concat(
+              S.templates.map(function (t) { return [t.template_id, t.name]; })), '') + '</select></div>' +
+          '<div class="field"><label for="n-start">開始日</label><input id="n-start" type="date" value="' + esc(S.today) + '"></div>' +
+        '</div>' +
+        '<div class="field"><label for="n-owner">オーナー</label><select id="n-owner">' +
+          optionList(S.users.map(function (u) { return [u.user_id, u.name]; }), S.me ? S.me.user_id : '') + '</select></div>' +
+        '<div id="n-fields"></div>' +
+        '<button class="btn primary" id="n-create">この内容で作成</button>' +
+      '</div></section>';
+  }
+
+  document.addEventListener('change', function (e) {
+    if (e.target.id === 'n-tpl') loadTemplateFields(e.target.value);
+  });
+  document.addEventListener('click', function (e) {
+    if (e.target.id === 'n-create') createProjectNow();
+  });
+
+  var tplFields = [];
+  function loadTemplateFields(templateId) {
+    tplFields = [];
+    var box = $('n-fields');
+    if (!templateId) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="help">設定項目を読み込んでいます…</div>';
+    google.script.run.withSuccessHandler(function (d) {
+      tplFields = d.fields;
+      box.innerHTML = d.fields.length
+        ? '<h3 style="margin:18px 0 10px">このテンプレートの設定項目</h3>' + d.fields.map(function (f) {
+            var id = 'cf-' + f.field_key, input;
+            if (f.type === 'select') input = '<select id="' + id + '"><option value=""></option>' +
+              (f.options || []).map(function (o) { return '<option>' + esc(o) + '</option>'; }).join('') + '</select>';
+            else if (f.type === 'checkbox') input = '<label class="help"><input type="checkbox" id="' + id + '"> はい</label>';
+            else input = '<input id="' + id + '" type="' + (f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text') + '">';
+            return '<div class="field"><label for="' + id + '">' + esc(f.label) +
+              (f.required ? ' <span class="late">必須</span>' : '') + '</label>' + input + '</div>';
+          }).join('')
+        : '';
+    }).withFailureHandler(fail).getTemplateDetail(templateId);
+  }
+
+  function createProjectNow() {
+    var cf = {};
+    tplFields.forEach(function (f) {
+      var el = $('cf-' + f.field_key);
+      if (!el) return;
+      cf[f.field_key] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? Number(el.value) : el.value);
+    });
+    var btn = $('n-create');
+    btn.disabled = true; btn.textContent = '作成しています…';
+    google.script.run
+      .withSuccessHandler(function (p) {
+        S.projects.push(p);
+        S.items = null;
+        toast('「' + p.name + '」を作成しました');
+        google.script.run.withSuccessHandler(function (d) {
+          d.summary.forEach(function (s) { S.summary[s.project_id] = s; });
+          S.projectId = p.project_id; go('detail'); loadItems();
+        }).withFailureHandler(fail).getBootstrap();
+      })
+      .withFailureHandler(function (err) {
+        btn.disabled = false; btn.textContent = 'この内容で作成';
+        fail(err);
+      })
+      .createProject({
+        name: $('n-name').value,
+        template_id: $('n-tpl').value,
+        start_date: $('n-start').value,
+        owner_user_id: $('n-owner').value,
+        custom_fields: cf
+      });
+  }
+
+  // ---- プロジェクト設定 ----
+  function projectSettings(p) {
+    return '<section class="card"><div class="card-body" style="max-width:620px">' +
+      '<div class="field"><label for="p-name">名称</label><input id="p-name" type="text" value="' + esc(p.name) + '"></div>' +
+      '<div class="field"><label for="p-desc">説明</label><textarea id="p-desc">' + esc(p.description || '') + '</textarea></div>' +
+      '<div class="row2">' +
+        '<div class="field"><label for="p-start">開始日</label><input id="p-start" type="date" value="' + esc(p.start_date) + '"></div>' +
+        '<div class="field"><label for="p-end">終了日</label><input id="p-end" type="date" value="' + esc(p.end_date) + '"></div>' +
+      '</div>' +
+      '<div class="row2">' +
+        '<div class="field"><label for="p-owner">オーナー</label><select id="p-owner">' +
+          optionList(S.users.map(function (u) { return [u.user_id, u.name]; }), p.owner_user_id) + '</select></div>' +
+        '<div class="field"><label for="p-status">ステータス</label><select id="p-status">' +
+          optionList(H.STATUS_ORDER.map(function (s) { return [s, H.STATUS_LABEL[s]]; }), p.status) + '</select></div>' +
+      '</div>' +
+      '<button class="btn primary" id="p-save">保存</button>' +
+    '</div></section>';
+  }
+
+  document.addEventListener('click', function (e) {
+    if (e.target.id !== 'p-save') return;
+    var p = project(S.projectId);
+    var btn = e.target;
+    btn.disabled = true;
+    google.script.run
+      .withSuccessHandler(function (r) {
+        p.name = $('p-name').value; p.description = $('p-desc').value;
+        p.start_date = $('p-start').value; p.end_date = $('p-end').value;
+        p.owner_user_id = $('p-owner').value; p.status = $('p-status').value;
+        p.updated_at = r.updated_at;
+        btn.disabled = false;
+        toast('保存しました');
+        render();
+      })
+      .withFailureHandler(function (err) { btn.disabled = false; fail(err); })
+      .saveProject({
+        project_id: p.project_id, updated_at: p.updated_at,
+        name: $('p-name').value, description: $('p-desc').value,
+        start_date: $('p-start').value, end_date: $('p-end').value,
+        owner_user_id: $('p-owner').value, status: $('p-status').value,
+        custom_fields: p.custom_fields || {}
+      });
+  });
+
+  // ---- ⑦ タスクの編集（小窓） ----
+  function openTaskEditor(itemId, projectIdForNew) {
+    var item = itemId ? itemById(itemId) : null;
+    var isNew = !item;
+    var pid = isNew ? projectIdForNew : item.project_id;
+    var p = project(pid);
+    var kids = item ? (S.items || []).filter(function (x) { return x.parent_item_id === item.item_id; }) : [];
+    var hasKids = kids.length > 0;
+
+    if (isNew) {
+      item = {
+        item_id: '', project_id: pid, parent_item_id: '', name: '', description: '',
+        item_type: 'work', assignee_user_id: '', status: 'not_started',
+        start_date: p ? p.start_date : S.today, end_date: p ? p.end_date : S.today, progress_rate: 0
+      };
+    }
+
+    var parents = itemsOf(pid).filter(function (x) { return Number(x.level) === 1 && x.item_id !== item.item_id; });
+
+    $('modal').innerHTML =
+      '<div class="m-head"><h2 id="modal-title">' + (isNew ? 'タスクを追加' : 'タスクの編集') + '</h2>' +
+        '<span class="spacer"></span><span class="faint">' + esc(item.item_key || '(キーは自動)') + '</span></div>' +
+      '<div class="m-body">' +
+        '<div class="field"><label for="t-name">タスク名</label><input id="t-name" type="text" value="' + esc(item.name) + '"></div>' +
+        '<div class="field"><label for="t-desc">説明</label><textarea id="t-desc">' + esc(item.description || '') + '</textarea></div>' +
+        '<div class="row2">' +
+          '<div class="field"><label for="t-type">種別</label><select id="t-type">' +
+            optionList([['work', '作業'], ['bug', 'バグ'], ['req', '要望']], item.item_type) + '</select></div>' +
+          '<div class="field"><label for="t-who">担当者</label><select id="t-who">' +
+            optionList([['', '未アサイン']].concat(S.users.map(function (u) { return [u.user_id, u.name]; })), item.assignee_user_id) + '</select></div>' +
+        '</div>' +
+        (isNew
+          ? '<div class="field"><label for="t-parent">親タスク</label><select id="t-parent">' +
+            optionList([['', 'なし（タスクとして作る）']].concat(
+              parents.map(function (x) { return [x.item_id, x.name]; })), '') +
+            '</select><div class="help">選ぶと、その下の子タスクになります</div></div>'
+          : '') +
+        '<div class="row2">' +
+          '<div class="field"><label for="t-start">開始日</label><input id="t-start" type="date" value="' + esc(item.start_date || '') + '"></div>' +
+          '<div class="field"><label for="t-end">終了日</label><input id="t-end" type="date" value="' + esc(item.end_date || '') + '"></div>' +
+        '</div>' +
+        '<div class="row2">' +
+          '<div class="field"><label for="t-status">ステータス</label><select id="t-status">' +
+            optionList(H.STATUS_ORDER.map(function (s) { return [s, H.STATUS_LABEL[s]]; }), item.status) + '</select>' +
+            '<div class="help">完了にすると進捗率は自動で100%になります</div></div>' +
+          '<div class="field"><label for="t-rate">進捗率（%）</label>' +
+            '<input id="t-rate" type="number" min="0" max="100" step="5" value="' +
+              (hasKids ? '' : (item.progress_rate === '' || item.progress_rate === null ? 0 : item.progress_rate)) + '"' +
+              (hasKids ? ' disabled' : '') + '>' +
+            '<div class="help">' + (hasKids
+              ? '<strong>子タスクを持つので入力できません。</strong>子 ' + kids.length + ' 件の平均になります'
+              : '状態の判定には使いません。進み具合を見るための数字です') + '</div></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="m-foot">' +
+        (isNew ? '' : '<button class="btn" id="t-del">削除</button>') +
+        '<span class="spacer"></span>' +
+        '<button class="btn" id="t-cancel">やめる</button>' +
+        '<button class="btn primary" id="t-save">' + (isNew ? '追加' : '保存') + '</button>' +
+      '</div>';
+
+    $('modal').hidden = false;
+    $('backdrop').hidden = false;
+    $('t-name').focus();
+
+    $('t-cancel').onclick = closeModal;
+    $('backdrop').onclick = closeModal;
+    if ($('t-del')) $('t-del').onclick = function () { removeTask(item, kids.length); };
+    $('t-save').onclick = function () { saveTask(item, isNew, hasKids); };
+  }
+
+  function closeModal() {
+    $('modal').hidden = true;
+    $('backdrop').hidden = true;
+    $('modal').innerHTML = '';
+  }
+
+  function saveTask(item, isNew, hasKids) {
+    var payload = {
+      name: $('t-name').value,
+      description: $('t-desc').value,
+      item_type: $('t-type').value,
+      assignee_user_id: $('t-who').value,
+      status: $('t-status').value,
+      start_date: $('t-start').value,
+      end_date: $('t-end').value,
+      progress_rate: hasKids ? null : Number($('t-rate').value || 0)
+    };
+    var btn = $('t-save');
+    btn.disabled = true; btn.textContent = '保存しています…';
+
+    function done(msg) {
+      toast(msg);
+      closeModal();
+      S.items = null;
+      render();
+      loadItems();
+      google.script.run.withSuccessHandler(function (d) {
+        d.summary.forEach(function (s) { S.summary[s.project_id] = s; });
+        S.unread = d.unread; $('bell-dot').hidden = !d.unread;
+      }).getBootstrap();
+    }
+    function ng(err) { btn.disabled = false; btn.textContent = isNew ? '追加' : '保存'; fail(err); }
+
+    if (isNew) {
+      payload.project_id = item.project_id;
+      payload.parent_item_id = $('t-parent') ? $('t-parent').value : '';
+      google.script.run.withSuccessHandler(function () { done('追加しました'); }).withFailureHandler(ng).addItem(payload);
+    } else {
+      payload.item_id = item.item_id;
+      payload.updated_at = item.updated_at;
+      google.script.run.withSuccessHandler(function () { done('保存しました'); }).withFailureHandler(ng).saveItem(payload);
+    }
+  }
+
+  function removeTask(item, kidCount) {
+    var msg = kidCount
+      ? '子タスクが ' + kidCount + ' 件あります。まとめて削除しますか？'
+      : 'このタスクを削除しますか？';
+    if (!window.confirm(msg)) return;
+    google.script.run
+      .withSuccessHandler(function () {
+        toast('削除しました');
+        closeModal();
+        S.items = null; render(); loadItems();
+      })
+      .withFailureHandler(fail)
+      .deleteItem(item.item_id, kidCount > 0);
+  }
+
+  // ---- ⑰ お知らせ ----
+  function loadNotifications() {
+    google.script.run.withSuccessHandler(function (list) {
+      var rows = list.map(function (n) {
+        return '<tr' + (n.read ? '' : ' style="background:var(--accent-soft)"') + '>' +
+          '<td><div class="cell"><span class="t" style="font-weight:' + (n.read ? '400' : '700') + '">' + esc(n.title) + '</span>' +
+            '<span class="s">' + esc(String(n.created_at).replace('T', ' ').slice(0, 16)) + '</span></div></td></tr>';
+      }).join('');
+      $('main').innerHTML = head('お知らせ', '画面の中だけの知らせです。メールやチャットには送りません',
+          (list.some(function (n) { return !n.read; }) ? '<button class="btn" id="n-read">すべて既読にする</button>' : '')) +
+        '<section class="card"><div class="tbl-wrap">' +
+          (list.length ? '<table class="tbl"><tbody>' + rows + '</tbody></table>'
+                       : '<div class="empty">お知らせはありません</div>') +
+        '</div></section>';
+      var b = $('n-read');
+      if (b) b.onclick = function () {
+        b.disabled = true;
+        google.script.run.withSuccessHandler(function (r) {
+          S.unread = r.unread; $('bell-dot').hidden = !r.unread;
+          toast('既読にしました'); loadNotifications();
+        }).withFailureHandler(fail).markNotificationsRead(list.filter(function (n) { return !n.read; })
+          .map(function (n) { return n.notification_id; }));
+      };
+    }).withFailureHandler(fail).getNotifications();
+  }
+
+  boot();
+})();
+</script>

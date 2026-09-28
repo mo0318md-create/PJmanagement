@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>横断検索・保存フィルタ｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .sr-wrap { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .sf-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: none; border-radius: 8px; background: transparent;
+    font: inherit; font-size: 13px; color: var(--text); cursor: pointer; text-align: left; }
+  .sf-item:hover { background: var(--surface-2); }
+  .sf-item.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 700; }
+  .sf-item .cnt { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+  .sf-edit { padding: 8px 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .sf-group { font-size: 11px; font-weight: 700; color: var(--text-muted); padding: 12px 10px 4px; letter-spacing: .06em; }
+  .cond { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .cond label { font-size: 12px; color: var(--text-muted); }
+  .lbl { font-size: 11px; border-radius: 4px; padding: 1px 7px; white-space: nowrap; }
+  @media (max-width: 900px) {
+    .sr-wrap { grid-template-columns: minmax(0, 1fr); }
+    .cond input[type=search] { width: 100% !important; }
+    .cond select.inline { max-width: 150px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="page-head">
+        <div>
+          <h1>横断検索・保存フィルタ</h1>
+          <div class="sub">プロジェクトをまたいでタスクを探します。ステータス名はプロジェクトごとに違うので、状態は「分類」で絞ります</div>
+        </div>
+      </div>
+
+      <div class="sr-wrap">
+        <div class="card" style="margin:0">
+          <div class="card-head">
+            <h2>保存フィルタ</h2>
+            <span class="spacer"></span>
+            <button class="btn sm" id="sf-manage">管理</button>
+          </div>
+          <div id="sf-list"></div>
+          <div class="card-head small muted" style="border-top:1px solid var(--border);border-bottom:none">
+            共有にすると朝会や定例でチーム全員が同じ条件を開けます。共有フィルタを変えられるのは作った人と管理者だけです。
+          </div>
+        </div>
+
+        <div>
+          <div class="card" style="margin-top:0">
+            <div class="card-body">
+              <div class="cond">
+                <input type="search" id="c-text" class="inline" placeholder="タスク名・説明で探す" style="width:220px" aria-label="テキスト">
+                <label for="c-pj">プロジェクト</label><select class="inline" id="c-pj"></select>
+                <label for="c-as">担当者</label><select class="inline" id="c-as"></select>
+                <label for="c-cat">分類</label><select class="inline" id="c-cat"></select>
+                <label for="c-h">健全性</label><select class="inline" id="c-h"></select>
+                <label for="c-due">期限</label><select class="inline" id="c-due"></select>
+                <label for="c-lb">ラベル</label><select class="inline" id="c-lb"></select>
+                <label class="check-line small"><input type="checkbox" id="c-done"> 完了も含める</label>
+                <span class="spacer"></span>
+                <button class="btn sm" id="c-clear">条件をクリア</button>
+                <button class="btn primary sm" id="c-save">この条件を保存</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>結果</h2><span class="chip" id="r-cnt">—</span><span class="spacer"></span><span class="small muted" id="r-note"></span></div>
+            <div class="card-body tight">
+              <table class="tbl">
+                <thead><tr><th>タスク</th><th>プロジェクト</th><th>ステータス</th><th>担当者</th><th>期限</th><th>健全性</th></tr></thead>
+                <tbody id="rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-5-10（保存フィルタの管理）／横断検索。キャンバスの ⑪ に対応します。</li>
+          <li>条件：テキスト・プロジェクト・担当者（自分・未アサインも選べる）・分類・健全性・期限の区分・ラベル。完了はふだん除きます。</li>
+          <li>「この条件を保存」で名前を付けて保存。「管理」で名前変更・個人用／共有の切替・削除ができます（モックでは画面上だけ。再読込で元に戻ります）。</li>
+          <li>「自分」「未アサイン」は保存時に固定せず、開いた人に合わせて解釈します（共有フィルタ「自分の遅延」は開いた人の遅延になる）。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  var me = U.renderShell({ active: 'search', view: 'project' });
+
+  var manage = false, current = null;
+  var trees = U.allProjectTrees().filter(function (t) { return !t.archived; });
+  var all = [];
+  trees.forEach(function (t) {
+    H.flatten(t).forEach(function (n) {
+      var parent = n.level === 2 ? t.children.filter(function (x) { return x.itemId === n.parentItemId; })[0] : null;
+      all.push({ node: n, project: t, parent: parent, bucket: H.dueBucket(n, D.today, D.settings.weekRangeDays) });
+    });
+  });
+
+  function opts(el, list) { el.innerHTML = list.map(function (o) { return '<option value="' + o[0] + '">' + U.esc(o[1]) + '</option>'; }).join(''); }
+  opts(document.getElementById('c-pj'), [['', 'すべて']].concat(trees.map(function (t) { return [t.projectId, t.name]; })));
+  opts(document.getElementById('c-as'), [['', 'すべて'], ['@me', '自分'], ['@none', '未アサイン']].concat(D.users.map(function (u) { return [u.userId, u.name]; })));
+  opts(document.getElementById('c-cat'), [['', 'すべて']].concat(['not_started', 'in_progress', 'on_hold', 'done'].map(function (k) { return [k, H.CATEGORY_LABEL[k]]; })));
+  opts(document.getElementById('c-h'), [['', 'すべて'], ['delayed', '遅延'], ['at_risk', '注意'], ['on_track', '順調'], ['not_started', '開始前']]);
+  opts(document.getElementById('c-due'), [['', 'すべて'], ['delayed', '超過'], ['today', '今日'], ['week', '今週'], ['later', '以降'], ['no_date', '終了日なし']]);
+  opts(document.getElementById('c-lb'), [['', 'すべて']].concat(D.labels.map(function (l) { return [l.labelId, l.name]; })));
+
+  var FIELDS = { text: 'c-text', project: 'c-pj', assignee: 'c-as', category: 'c-cat', health: 'c-h', due: 'c-due', label: 'c-lb' };
+  function readCond() {
+    var c = {};
+    Object.keys(FIELDS).forEach(function (k) { var v = document.getElementById(FIELDS[k]).value; if (v) c[k] = v; });
+    if (document.getElementById('c-done').checked) c.includeDone = true;
+    return c;
+  }
+  function writeCond(c) {
+    Object.keys(FIELDS).forEach(function (k) { document.getElementById(FIELDS[k]).value = c[k] || ''; });
+    document.getElementById('c-done').checked = !!c.includeDone;
+  }
+  function match(x, c) {
+    var n = x.node;
+    if (!c.includeDone && n.statusCategory === 'done' && c.category !== 'done') return false;
+    if (c.text && (n.name + ' ' + (n.description || '')).indexOf(c.text) < 0) return false;
+    if (c.project && x.project.projectId !== c.project) return false;
+    if (c.assignee === '@me' && n.assigneeUserId !== me.userId) return false;
+    if (c.assignee === '@none' && n.assigneeUserId) return false;
+    if (c.assignee && c.assignee.charAt(0) !== '@' && n.assigneeUserId !== c.assignee) return false;
+    if (c.category && n.statusCategory !== c.category) return false;
+    if (c.health && n.calc.health !== c.health) return false;
+    if (c.due && x.bucket !== c.due) return false;
+    if (c.label && (n.labelIds || []).indexOf(c.label) < 0) return false;
+    return true;
+  }
+  function count(c) { return all.filter(function (x) { return match(x, c); }).length; }
+
+  function renderList() {
+    var mine = D.savedFilters.filter(function (f) { return !f.shared && f.ownerUserId === me.userId; });
+    var shared = D.savedFilters.filter(function (f) { return f.shared; });
+    var el = document.getElementById('sf-list');
+    document.getElementById('sf-manage').textContent = manage ? '完了' : '管理';
+    function item(f) {
+      if (!manage) {
+        return '<button class="sf-item' + (current === f.id ? ' on' : '') + '" data-open="' + f.id + '">' + (f.shared ? '👥 ' : '') +
+          U.esc(f.name) + '<span class="cnt">' + count(f.cond) + '</span></button>';
+      }
+      var canEdit = !f.shared || f.ownerUserId === me.userId || me.role === 'admin';
+      return '<div class="sf-edit"><input type="text" class="inline" value="' + U.esc(f.name) + '" data-rename="' + f.id + '"' + (canEdit ? '' : ' disabled') + ' aria-label="名前">' +
+        '<div style="display:flex;gap:6px;align-items:center"><button class="btn sm" data-share="' + f.id + '"' + (canEdit ? '' : ' disabled') + '>' + (f.shared ? '共有 → 個人用にする' : '個人用 → 共有にする') + '</button>' +
+        '<span class="spacer"></span><button class="btn ghost sm" data-del="' + f.id + '"' + (canEdit ? '' : ' disabled') + ' style="color:var(--h-delayed)">削除</button></div>' +
+        (canEdit ? '' : '<div class="small faint">作成者（' + U.esc(D.userName(f.ownerUserId)) + '）か管理者だけが変更できます</div>') + '</div>';
+    }
+    el.innerHTML = '<div class="sf-group">マイフィルタ</div>' + (mine.length ? mine.map(item).join('') : '<div class="small faint" style="padding:4px 10px">まだありません</div>') +
+      '<div class="sf-group">共有フィルタ</div>' + (shared.length ? shared.map(item).join('') : '<div class="small faint" style="padding:4px 10px">まだありません</div>');
+
+    el.querySelectorAll('[data-open]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var f = D.savedFilters.filter(function (x) { return x.id === b.getAttribute('data-open'); })[0];
+        current = f.id; writeCond(f.cond); renderAll();
+      });
+    });
+    el.querySelectorAll('[data-rename]').forEach(function (i) {
+      i.addEventListener('change', function () { D.savedFilters.forEach(function (f) { if (f.id === i.getAttribute('data-rename')) f.name = i.value; }); });
+    });
+    el.querySelectorAll('[data-share]').forEach(function (b) {
+      b.addEventListener('click', function () { D.savedFilters.forEach(function (f) { if (f.id === b.getAttribute('data-share')) f.shared = !f.shared; }); renderList(); });
+    });
+    el.querySelectorAll('[data-del]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var f = D.savedFilters.filter(function (x) { return x.id === b.getAttribute('data-del'); })[0];
+        if (!confirm('「' + f.name + '」を削除しますか？' + (f.shared ? '（共有フィルタなので全員の一覧から消えます）' : ''))) return;
+        D.savedFilters.splice(D.savedFilters.indexOf(f), 1);
+        if (current === f.id) current = null;
+        renderList();
+      });
+    });
+  }
+
+  function renderRows() {
+    var c = readCond();
+    var list = all.filter(function (x) { return match(x, c); })
+      .sort(function (a, b) { return (a.node.endDate || '9') < (b.node.endDate || '9') ? -1 : 1; });
+    document.getElementById('r-cnt').textContent = list.length + ' 件';
+    document.getElementById('r-note').textContent = Object.keys(c).length ? '' : '条件なし（完了を除く全件）';
+    document.getElementById('rows').innerHTML = list.length ? list.map(function (x) {
+      var n = x.node;
+      var labels = (n.labelIds || []).map(function (id) { var l = D.labelById(id); return l ? '<span class="lbl" style="background:' + l.color + '">' + U.esc(l.name) + '</span>' : ''; }).join(' ');
+      return '<tr><td><a class="row-link" href="task-edit.html?id=' + n.itemId + '">' + U.esc(n.name) + '</a> ' + labels +
+        (x.parent ? '<div class="small muted">' + U.esc(x.parent.name) + '</div>' : '') + '</td>' +
+        '<td class="small"><a href="project-detail.html?id=' + x.project.projectId + '">' + U.esc(x.project.name) + '</a></td>' +
+        '<td>' + U.statusChip(n.status) + '</td>' +
+        '<td class="small">' + (n.assigneeUserId ? U.esc(D.userName(n.assigneeUserId)) : '<span class="faint">未アサイン</span>') + '</td>' +
+        '<td>' + U.dueText(n.calc, n.endDate) + '</td>' +
+        '<td>' + U.healthBadge(n.calc.health) + '</td></tr>';
+    }).join('') : '<tr><td colspan="6"><div class="empty">条件に合うタスクはありません</div></td></tr>';
+  }
+
+  function renderAll() { renderList(); renderRows(); }
+
+  Object.keys(FIELDS).forEach(function (k) {
+    var el = document.getElementById(FIELDS[k]);
+    el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', function () { current = null; renderAll(); });
+  });
+  document.getElementById('c-done').addEventListener('change', function () { current = null; renderAll(); });
+  document.getElementById('c-clear').addEventListener('click', function () { writeCond({}); current = null; renderAll(); });
+  document.getElementById('sf-manage').addEventListener('click', function () { manage = !manage; renderList(); });
+  document.getElementById('c-save').addEventListener('click', function () {
+    var name = prompt('保存フィルタの名前', '新しいフィルタ');
+    if (!name) return;
+    var f = { id: 'sf' + Date.now(), ownerUserId: me.userId, name: name, shared: false, cond: readCond() };
+    D.savedFilters.push(f);
+    current = f.id;
+    renderAll();
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト一覧｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div>
+          <h1>プロジェクト一覧</h1>
+          <div class="sub">プロジェクト単位の入口です。名前をクリックすると詳細に移ります</div>
+        </div>
+        <span class="spacer"></span>
+        <div class="btn-row"><a class="btn primary" href="project-new.html">＋ プロジェクトを作成</a></div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <a href="projects.html" class="active" aria-current="page">一覧</a>
+        <a href="portfolio.html">ガント</a>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>プロジェクト</h2>
+          <span class="tag" id="count">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <select class="inline" id="f-health" aria-label="状態で絞り込み"></select>
+            <select class="inline" id="f-owner" aria-label="オーナーで絞り込み"></select>
+            <select class="inline" id="f-tpl" aria-label="テンプレートで絞り込み"></select>
+            <select class="inline" id="f-sort" aria-label="並び順">
+              <option value="health">遅延している順</option>
+              <option value="due">期限が近い順</option>
+              <option value="name">名前順</option>
+            </select>
+            <label class="small muted"><input type="checkbox" id="f-done"> 完了も表示</label>
+          </div>
+        </div>
+        <div class="card-body tight" id="list"></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-0-2（軸の入口）／F-3-1〜F-3-4（一覧・サマリ・絞り込み・並べ替え）</li>
+          <li>実装では、この一覧は<strong>集計キャッシュ</strong>（F-5-6）だけを読んで描きます。タスク1,000行を待たずに最初の画面が出ます。</li>
+          <li>進捗バーの縦線は「今日の時点で本来どこまで進んでいるはずか」（予定進捗）です。塗りが線より左にあるほど遅れています。<strong>状態の判定には使いません</strong>ので、遅れの兆しはここで人が見ます。</li>
+          <li>プロジェクトの状態は終了日だけで決まるため、終盤まで「対応中」のままです。そこで<strong>遅延はタスクの件数</strong>でサマリに出しています。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+
+  var trees = D.allTrees();
+
+  // ---- 絞り込みの選択肢 ----
+  function opts(id, list) {
+    document.getElementById(id).innerHTML = list.map(function (o) {
+      return '<option value="' + o[0] + '">' + U.esc(o[1]) + '</option>';
+    }).join('');
+  }
+  opts('f-health', [['', '状態：すべて'], ['delayed', '遅延'], ['on_track', '対応中'],
+    ['not_started', '開始前'], ['done', '完了']]);
+  opts('f-owner', [['', 'オーナー：すべて']].concat(D.users.map(function (u) { return [u.userId, u.name]; })));
+  opts('f-tpl', [['', 'テンプレート：すべて']].concat(D.templates.map(function (t) { return [t.templateId, t.name]; })));
+
+  ['f-health', 'f-owner', 'f-tpl', 'f-sort', 'f-done'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+
+  // ---- サマリ ----
+  // プロジェクト自体は終了日を過ぎるまで「対応中」のままなので、
+  // 遅延はタスクの件数で数える（そうしないと遅れが1件も出ない）
+  function renderStats() {
+    var by = { delayed: 0, on_track: 0, not_started: 0, done: 0, no_period: 0 };
+    var delayedTasks = 0, pjWithDelay = 0;
+    trees.forEach(function (t) {
+      by[t.calc.health]++;
+      var n = t.calc.delayedInside + (t.calc.health === 'delayed' ? 1 : 0);
+      delayedTasks += t.calc.delayedInside;
+      if (t.calc.delayedInside > 0) pjWithDelay++;
+    });
+
+    var tiles = [
+      { cls: 'delayed', label: '遅延しているタスク', value: delayedTasks,
+        note: pjWithDelay ? pjWithDelay + ' プロジェクトで発生' : '遅れているタスクはありません' },
+      { cls: 'on_track', label: '対応中のプロジェクト', value: by.on_track, note: '終了日をまだ過ぎていない' },
+      { cls: 'not_started', label: '開始前', value: by.not_started, note: '開始日より前' },
+      { cls: 'done', label: '完了', value: by.done, note: 'ステータスが完了' }
+    ];
+    if (by.delayed) {
+      tiles.splice(1, 0, { cls: 'delayed', label: '終了日を過ぎたプロジェクト', value: by.delayed, note: 'プロジェクト自体が超過' });
+    }
+
+    document.getElementById('stats').innerHTML = tiles.map(function (t) {
+      return '<div class="stat ' + t.cls + '"><div class="label">' + t.label + '</div>' +
+        '<div class="value">' + t.value + '<span class="unit">件</span></div>' +
+        '<div class="small muted" style="margin-top:4px">' + t.note + '</div></div>';
+    }).join('');
+  }
+
+  // ---- 一覧 ----
+  // 列幅は固定。プロジェクト名が長くても列の位置が動かない
+  var COLS = '<colgroup>' +
+    '<col><col style="width:128px"><col style="width:176px">' +
+    '<col class="col-hide" style="width:196px"><col class="col-hide" style="width:124px">' +
+    '<col style="width:136px"></colgroup>';
+
+  var HEALTH_RANK = { delayed: 0, no_period: 1, on_track: 2, not_started: 3, done: 4 };
+
+  function render() {
+    var fh = document.getElementById('f-health').value;
+    var fo = document.getElementById('f-owner').value;
+    var ft = document.getElementById('f-tpl').value;
+    var sort = document.getElementById('f-sort').value;
+    var showDone = document.getElementById('f-done').checked;
+
+    var rows = trees.filter(function (t) {
+      if (!showDone && t.node.status === 'done') return false;
+      if (fh && t.calc.health !== fh) return false;
+      if (fo && t.node.ownerUserId !== fo) return false;
+      if (ft && t.node.templateId !== ft) return false;
+      return true;
+    });
+
+    rows.sort(function (a, b) {
+      if (sort === 'name') return a.node.name.localeCompare(b.node.name, 'ja');
+      if (sort === 'due') return (a.node.endDate || '9999').localeCompare(b.node.endDate || '9999');
+      var d = HEALTH_RANK[a.calc.health] - HEALTH_RANK[b.calc.health];
+      return d !== 0 ? d : (b.calc.overDays || 0) - (a.calc.overDays || 0);
+    });
+
+    document.getElementById('count').textContent = rows.length + ' 件';
+
+    if (!rows.length) {
+      document.getElementById('list').innerHTML = '<div class="empty">条件に合うプロジェクトがありません</div>';
+      return;
+    }
+
+    document.getElementById('list').innerHTML =
+      '<table class="tbl fixed">' + COLS + '<thead><tr>' +
+        '<th>プロジェクト</th><th>状態</th><th>進捗</th><th class="col-hide">期間</th>' +
+        '<th class="col-hide">期限まで</th><th class="col-hide">タスク</th><th>オーナー</th>' +
+      '</tr></thead><tbody>' +
+      rows.map(function (t) {
+        var p = t.node, c = t.calc;
+        var subTotal = 0, subDone = 0;
+        t.children.forEach(function (x) { subTotal += x.children.length; subDone += x.calc.doneCount; });
+        return '<tr>' +
+          '<td><div class="name-cell">' +
+            '<a class="row-link" href="project.html?id=' + p.projectId + '"><strong>' + U.esc(p.name) + '</strong></a>' +
+            '<div class="small muted">' + U.esc(p.key) + ' ・ ' + U.esc(p.templateName || 'テンプレートなし') +
+              (c.delayedInside > 0 ? ' ・ <span class="delay-note">配下の遅延 ' + c.delayedInside + '件</span>' : '') +
+            '</div>' +
+          '</div></td>' +
+          '<td>' + U.healthBadge(c.health) + '</td>' +
+          '<td style="min-width:150px">' + U.progressBar(c) + '</td>' +
+          '<td class="col-hide small">' + U.periodText(p.startDate, p.endDate) + '</td>' +
+          '<td class="col-hide small">' + U.dueText(c) + '</td>' +
+          '<td class="col-hide small num">' + c.doneCount + '/' + c.childCount +
+            ' <span class="faint">（子 ' + subDone + '/' + subTotal + '）</span></td>' +
+          '<td class="small" style="white-space:nowrap">' + U.esc(D.userName(p.ownerUserId)) + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  renderStats();
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト作成｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="breadcrumb"><a href="dashboard-manager.html">プロジェクト一覧</a> ／ 新規作成</div>
+
+      <div class="page-head">
+        <div>
+          <h1>プロジェクトを作成</h1>
+          <div class="sub">テンプレートを選ぶと、配下のタスク・子タスクが自動登録されます</div>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step active"><span class="n">1</span>テンプレート選択</div><span class="sep">›</span>
+        <div class="step active"><span class="n">2</span>基本情報</div><span class="sep">›</span>
+        <div class="step active"><span class="n">3</span>設定項目</div><span class="sep">›</span>
+        <div class="step active"><span class="n">4</span>確認して作成</div>
+      </div>
+
+      <!-- ===== 1. テンプレート ===== -->
+      <div class="card">
+        <div class="card-head"><h2>1. テンプレートを選択</h2>
+          <span class="spacer"></span>
+          <a class="btn sm ghost" href="template-list.html">テンプレートを管理</a>
+        </div>
+        <div class="card-body">
+          <div class="tpl-grid" id="tpl-grid"></div>
+        </div>
+      </div>
+
+      <!-- ===== 2. 基本情報 ===== -->
+      <div class="card">
+        <div class="card-head"><h2>2. 基本情報</h2></div>
+        <div class="card-body">
+          <div class="grid2">
+            <div class="field">
+              <label for="f-name">プロジェクト名<span class="req">必須</span></label>
+              <input type="text" id="f-name" placeholder="例）コーポレートサイトリニューアル">
+            </div>
+            <div class="field">
+              <label for="f-owner">オーナー<span class="req">必須</span></label>
+              <select id="f-owner"></select>
+            </div>
+            <div class="field">
+              <label for="f-start">開始日<span class="req">必須</span></label>
+              <input type="date" id="f-start">
+              <div class="help">テンプレートの相対日数は、この日を起点に実日付へ展開されます</div>
+            </div>
+            <div class="field">
+              <label for="f-end">終了日<span class="req">必須</span></label>
+              <input type="date" id="f-end">
+              <div class="help" id="dur-help">—</div>
+            </div>
+            <div class="field">
+              <label for="f-mode">判定モード</label>
+              <select id="f-mode">
+                <option value="">システム既定を使う</option>
+                <option value="auto">自動集計</option>
+                <option value="manual">進捗率手入力</option>
+                <option value="deadline">終了日超過のみ</option>
+              </select>
+              <div class="help" id="mode-help">—</div>
+            </div>
+            <div class="field">
+              <label for="f-desc">説明</label>
+              <textarea id="f-desc" placeholder="目的や背景をメモできます"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 3. カスタム項目 ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>3. このテンプレート固有の設定項目</h2>
+          <span class="tag" id="cf-tpl">—</span>
+        </div>
+        <div class="card-body">
+          <div class="grid2" id="custom-fields"></div>
+        </div>
+      </div>
+
+      <!-- ===== 4. プレビュー ===== -->
+      <div class="card">
+        <div class="card-head">
+          <h2>4. 自動登録されるタスク構成</h2>
+          <span class="chip" id="preview-count">—</span>
+          <span class="spacer"></span>
+          <span class="small muted">作成後に追加・削除・日程変更ができます</span>
+        </div>
+        <div class="card-body tight">
+          <div id="preview"></div>
+        </div>
+      </div>
+
+      <div class="btn-row" style="justify-content:flex-end;margin-bottom:16px">
+        <a class="btn" href="dashboard-manager.html">キャンセル</a>
+        <button class="btn primary" id="btn-create">この内容で作成する</button>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>作成したプロジェクトは「計画中」から始まります。この間は日付を何度直しても当初比に出ません。日程が固まったらプロジェクト詳細の「当初計画」で管理者が確定します（F-2-18）。</li>
+          <li>対応要件: F-1-1（自動生成）／F-1-2（相対日付の展開）／F-1-5（項目の動的表示）／F-1-6（プレビュー）／F-2-5（判定モード）</li>
+          <li>テンプレートを切り替えると、3の設定項目と4のタスク構成が丸ごと入れ替わります。ここが「プロジェクトによって設定項目が異なる」への対応です。</li>
+          <li>開始日を変えると、4のプレビューの日付がその場で再計算されます（相対日数 → 実日付）。</li>
+          <li>「テンプレートを使わない」を選ぶと空のプロジェクトを作成し、あとから手動でタスクを追加します（F-5-5）。</li>
+          <li>未確定: 作成時に担当者まで割り当てるか。現状はテンプレートに「既定ロール」だけ持たせ、担当者は作成後に割り当てる想定です。</li>
+          <li>未確定: 終了日はテンプレートの既定日数から自動計算していますが、手で縮めたときにタスクの日程を圧縮するか、はみ出させるか。現在は「はみ出させて警告」想定。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  var me = UI.renderShell({ active: 'project-new', view: 'project' });
+
+  var selectedId = 'tpl_web';
+  var customValues = {};
+
+  var elStart = document.getElementById('f-start');
+  var elEnd = document.getElementById('f-end');
+
+  // ---- オーナー ----
+  document.getElementById('f-owner').innerHTML = D.users.map(function (u) {
+    return '<option value="' + u.userId + '"' + (u.userId === me.userId ? ' selected' : '') + '>' + U.esc(u.name) + '</option>';
+  }).join('');
+
+  // ---- テンプレートカード ----
+  function renderTemplates() {
+    var cards = D.templates.filter(function (t) { return t.active; }).map(function (t) {
+      var tasks = t.items.filter(function (i) { return i.level === 1; }).length;
+      var subs = t.items.length - tasks;
+      return '<button class="tpl-card' + (t.templateId === selectedId ? ' selected' : '') + '" data-id="' + t.templateId + '">' +
+        '<div class="t-name">' + U.esc(t.name) + '</div>' +
+        '<div class="t-desc">' + U.esc(t.description) + '</div>' +
+        '<div class="t-meta"><span class="tag">' + U.esc(t.category) + '</span>' +
+          '<span>タスク ' + tasks + ' ／ 子タスク ' + subs + '</span>' +
+          '<span>標準 ' + t.defaultDurationDays + '日</span>' +
+          '<span>設定項目 ' + t.fields.length + '</span></div>' +
+        '</button>';
+    }).join('');
+
+    cards += '<button class="tpl-card' + (selectedId === '' ? ' selected' : '') + '" data-id="">' +
+      '<div class="t-name">テンプレートを使わない</div>' +
+      '<div class="t-desc">空のプロジェクトを作成し、タスクは後から手動で追加します。</div>' +
+      '<div class="t-meta"><span class="tag">手動</span><span>設定項目なし</span></div>' +
+      '</button>';
+
+    document.getElementById('tpl-grid').innerHTML = cards;
+    document.getElementById('tpl-grid').querySelectorAll('.tpl-card').forEach(function (b) {
+      b.addEventListener('click', function () {
+        selectedId = this.getAttribute('data-id');
+        customValues = {};
+        applyTemplate();
+      });
+    });
+  }
+
+  function template() {
+    return selectedId ? D.templateById(selectedId) : null;
+  }
+
+  // ---- 期間の初期値 ----
+  function applyDuration() {
+    var t = template();
+    var days = t ? t.defaultDurationDays : 30;
+    if (!elStart.value) elStart.value = D.today;
+    elEnd.value = H.addDays(elStart.value, days - 1);
+    updateDurHelp();
+  }
+  function updateDurHelp() {
+    if (!elStart.value || !elEnd.value) { document.getElementById('dur-help').textContent = '—'; return; }
+    var n = H.diffDays(elStart.value, elEnd.value) + 1;
+    document.getElementById('dur-help').textContent =
+      '全 ' + n + ' 日間' + (template() ? '（テンプレート標準: ' + template().defaultDurationDays + '日）' : '');
+  }
+
+  // ---- カスタム項目（F-1-5） ----
+  function renderCustomFields() {
+    var t = template();
+    var box = document.getElementById('custom-fields');
+    document.getElementById('cf-tpl').textContent = t ? t.name : 'テンプレートなし';
+
+    if (!t || !t.fields.length) {
+      box.innerHTML = '<div class="muted small">このテンプレートには固有の設定項目がありません。</div>';
+      return;
+    }
+
+    box.innerHTML = t.fields.map(function (f) {
+      var id = 'cf_' + f.fieldKey;
+      var input;
+      if (f.type === 'select') {
+        input = '<select id="' + id + '" data-key="' + f.fieldKey + '"><option value="">選択してください</option>' +
+          (f.options || []).map(function (o) { return '<option>' + U.esc(o) + '</option>'; }).join('') + '</select>';
+      } else if (f.type === 'checkbox') {
+        input = '<label class="check-line"><input type="checkbox" id="' + id + '" data-key="' + f.fieldKey + '"> ' + U.esc(f.label) + '</label>';
+      } else if (f.type === 'number') {
+        input = '<input type="number" id="' + id + '" data-key="' + f.fieldKey + '" placeholder="0">';
+      } else if (f.type === 'date') {
+        input = '<input type="date" id="' + id + '" data-key="' + f.fieldKey + '">';
+      } else {
+        input = '<input type="text" id="' + id + '" data-key="' + f.fieldKey + '">';
+      }
+      return '<div class="field">' +
+        (f.type === 'checkbox' ? '' :
+          '<label for="' + id + '">' + U.esc(f.label) + (f.required ? '<span class="req">必須</span>' : '') + '</label>') +
+        input +
+        (f.helpText ? '<div class="help">' + U.esc(f.helpText) + '</div>' : '') +
+        '</div>';
+    }).join('');
+
+    box.querySelectorAll('[data-key]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        customValues[this.getAttribute('data-key')] =
+          this.type === 'checkbox' ? this.checked : this.value;
+      });
+    });
+  }
+
+  // ---- 生成されるタスク構成のプレビュー（F-1-2 / F-1-6） ----
+  function renderPreview() {
+    var t = template();
+    var box = document.getElementById('preview');
+    if (!t) {
+      box.innerHTML = '<div class="empty">テンプレートを使わないため、タスクは自動生成されません。作成後に追加してください。</div>';
+      document.getElementById('preview-count').textContent = '0 件';
+      return;
+    }
+    var start = elStart.value || D.today;
+    var expanded = U.expandTemplate(t, start);
+    var byId = {};
+    expanded.forEach(function (e) { byId[e.templateItemId] = e; });
+
+    var html = '<div class="tree-row head"><div>タスク / 子タスク</div><div>既定ロール</div><div>日数</div>' +
+      '<div class="col-hide">開始日</div><div class="col-hide">終了日</div></div>';
+
+    expanded.filter(function (e) { return e.level === 1; }).forEach(function (task) {
+      html += previewRow(task);
+      expanded.filter(function (e) { return e.parentTemplateItemId === task.templateItemId; })
+        .forEach(function (s) { html += previewRow(s); });
+    });
+
+    box.innerHTML = html;
+    var tasks = expanded.filter(function (e) { return e.level === 1; }).length;
+    document.getElementById('preview-count').textContent =
+      'タスク ' + tasks + ' ／ 子タスク ' + (expanded.length - tasks) + ' を自動登録';
+  }
+
+  function previewRow(e) {
+    return '<div class="tree-row lv' + e.level + '">' +
+      '<div class="name"><span class="toggle leaf"></span><span class="txt">' + U.esc(e.name) + '</span></div>' +
+      '<div class="small muted">' + U.esc(e.defaultRole || '—') + '</div>' +
+      '<div class="small num">' + e.offsetDurationDays + '日</div>' +
+      '<div class="col-hide small num">' + H.formatDate(e.startDate, true) + '</div>' +
+      '<div class="col-hide small num">' + H.formatDate(e.endDate, true) + '</div>' +
+      '</div>';
+  }
+
+  function updateModeHelp() {
+    var v = document.getElementById('f-mode').value;
+    document.getElementById('mode-help').textContent =
+      v ? H.MODE_DESC[v] : 'システム既定（' + H.MODE_LABEL[D.settings.defaultProgressMode] + '）が使われます。';
+  }
+
+  function applyTemplate() {
+    renderTemplates();
+    applyDuration();
+    renderCustomFields();
+    renderPreview();
+  }
+
+  elStart.addEventListener('change', function () { applyDuration(); renderPreview(); });
+  elEnd.addEventListener('change', updateDurHelp);
+  document.getElementById('f-mode').addEventListener('change', updateModeHelp);
+
+  document.getElementById('btn-create').addEventListener('click', function () {
+    var name = document.getElementById('f-name').value.trim();
+    if (!name) { alert('プロジェクト名を入力してください。'); return; }
+    var t = template();
+    var missing = t ? t.fields.filter(function (f) {
+      return f.required && !customValues[f.fieldKey];
+    }).map(function (f) { return f.label; }) : [];
+    if (missing.length) { alert('必須の設定項目が未入力です：\n・' + missing.join('\n・')); return; }
+    alert('［モック］「' + name + '」を作成し、' +
+      (t ? t.items.length + ' 件のタスク・子タスクを自動登録' : 'タスクなしで作成') +
+      'します。\n実装ではこの後、プロジェクト詳細へ遷移します。');
+    location.href = 'project-detail.html?id=p1';
+  });
+
+  elStart.value = D.today;
+  document.getElementById('f-name').value = '';
+  applyTemplate();
+  updateModeHelp();
+})();
+</script>
+</body>
+</html>

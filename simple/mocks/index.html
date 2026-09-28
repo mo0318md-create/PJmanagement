@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>画面一覧｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 12px; margin-bottom: 26px; }
+  .hub-card { display: block; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); }
+  .hub-card:hover { border-color: var(--accent); text-decoration: none; }
+  .hub-card .n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-text); font-size: 14px; font-weight: 700; }
+  .hub-card .t { font-weight: 700; margin: 8px 0 5px; font-size: 16px; }
+  .hub-card .d { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+  h2.sec { font-size: 16px; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .diff { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .diff { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>画面一覧（簡易版）</h1>
+          <div class="sub">Google Apps Script の Web アプリとして作る、コンパクトな版のモックです。番号は要件書の §4 と共通です</div></div>
+      </div>
+
+      <div class="callout" style="margin-bottom:20px">
+        <strong>完全版との違い</strong>：進捗率を手入力だけにし、当初計画（ベースライン）・作業の重さと負荷・
+        実績の開始終了日・マイルストーン・ラベル・アーカイブ・スマホ専用画面を落としました。
+        画面 23→18、シート 16→9、要件 68→53 です。詳しくは
+        <a href="../docs/requirements.md">要件書</a> の §7。
+      </div>
+
+      <h2 class="sec">プロジェクト単位</h2>
+      <div class="hub-grid">
+        <a class="hub-card" href="projects.html">
+          <div class="n">①</div><div class="t">プロジェクト一覧</div>
+          <div class="d">入口。状態・進捗・期限を俯瞰します。実装では集計キャッシュだけを読んで先に描きます。</div></a>
+        <a class="hub-card" href="portfolio.html">
+          <div class="n">②</div><div class="t">全プロジェクトのガント</div>
+          <div class="d">全プロジェクトを1本の時間軸に。行を開くと配下のタスクまで降りられます。一覧のタブから開きます。</div></a>
+        <a class="hub-card" href="project.html?id=p1">
+          <div class="n">③</div><div class="t">プロジェクト概要</div>
+          <div class="d">ツリー、消化状況、テンプレートの設定項目。</div></a>
+        <a class="hub-card" href="board.html?id=p1">
+          <div class="n">④</div><div class="t">ボード</div>
+          <div class="d">4列固定。カードをドラッグしてステータスを変えます。</div></a>
+        <a class="hub-card" href="list.html?id=p1">
+          <div class="n">⑤</div><div class="t">リスト</div>
+          <div class="d">まとめ方を切替。行から進捗率とステータスを直接変えられます。</div></a>
+        <a class="hub-card" href="gantt.html?id=p1">
+          <div class="n">⑥</div><div class="t">ガント（1プロジェクト内）</div>
+          <div class="d">1本のバーの中を進捗率ぶん濃く塗ります。今日線つき。</div></a>
+        <a class="hub-card" href="task-edit.html?id=i103c">
+          <div class="n">⑦</div><div class="t">タスクの編集</div>
+          <div class="d">値を変えると判定がその場で変わります。理由も1行で出します。</div></a>
+        <a class="hub-card" href="project-settings.html?id=p1">
+          <div class="n">⑧</div><div class="t">プロジェクト設定</div>
+          <div class="d">基本情報とテンプレート由来の設定項目。</div></a>
+        <a class="hub-card" href="project-new.html">
+          <div class="n">⑨</div><div class="t">プロジェクト作成</div>
+          <div class="d">テンプレートを選ぶと、作られるタスクと日付を先に見せます。</div></a>
+        <a class="hub-card" href="search.html">
+          <div class="n">⑩</div><div class="t">横断検索</div>
+          <div class="d">全プロジェクトのタスクをまとめて探します。ブラウザの中だけで走ります。</div></a>
+      </div>
+
+      <h2 class="sec">担当者単位</h2>
+      <div class="hub-grid">
+        <a class="hub-card" href="people.html">
+          <div class="n">⑪</div><div class="t">担当者一覧</div>
+          <div class="d">入口。誰にどれだけ溜まっているかを件数で見ます。未アサインも出します。</div></a>
+        <a class="hub-card" href="people-gantt.html">
+          <div class="n">⑫</div><div class="t">担当者別ガント</div>
+          <div class="d">担当者 ＞ プロジェクト ＞ タスクで1本の時間軸に。一覧のタブから開きます。</div></a>
+        <a class="hub-card" href="member.html?user=u3">
+          <div class="n">⑬</div><div class="t">個人ページ</div>
+          <div class="d">1人分の担当タスク・関わるPJ・担当分のガント。</div></a>
+        <a class="hub-card" href="my-tasks.html">
+          <div class="n">⑭</div><div class="t">マイタスク</div>
+          <div class="d">自分専用。期限の区分ごとのタブ。その場でステータスを変えられます。</div></a>
+      </div>
+
+      <h2 class="sec">管理</h2>
+      <div class="hub-grid">
+        <a class="hub-card" href="settings.html">
+          <div class="n">⑮</div><div class="t">設定</div>
+          <div class="d">しきい値・ユーザー・お知らせの種類。</div></a>
+        <a class="hub-card" href="templates.html">
+          <div class="n">⑯</div><div class="t">テンプレート編集</div>
+          <div class="d">タスク構成（相対日数）と設定項目の定義。</div></a>
+        <a class="hub-card" href="notifications.html">
+          <div class="n">⑰</div><div class="t">お知らせ</div>
+          <div class="d">ヘッダーのベルから。担当変更はその場、期限と遅延は毎朝まとめて作ります。</div></a>
+        <a class="hub-card" href="rules.html">
+          <div class="n">⑱</div><div class="t">判定ルール</div>
+          <div class="d">対応中・遅延の決め方と、言葉の決まり。</div></a>
+      </div>
+
+      <h2 class="sec">確かめ方</h2>
+      <div class="diff">
+        <div class="card"><div class="card-head"><h2>用意したデータ</h2></div><div class="card-body small">
+          <p>今日は <strong id="d-today">—</strong> として計算しています。</p>
+          <ul id="d-list" style="margin:0;padding-left:20px;line-height:1.9"></ul>
+        </div></div>
+        <div class="card"><div class="card-head"><h2>見どころ</h2></div><div class="card-body small">
+          <ul style="margin:0;padding-left:20px;line-height:1.9">
+            <li><strong>進捗率を更新しなくても遅れが出る</strong>：⑤リストで「スマホで表示が崩れる」の進捗率を100%近くまで上げても、終了日を過ぎているので遅延のままです。</li>
+            <li><strong>親は手入力できない</strong>：⑦で「デザイン」を開くと、進捗率の欄が止まっています。子3件の平均が出ます。</li>
+            <li><strong>ドラッグでステータス変更</strong>：④でカードを「完了」の列に入れると、進捗率が自動で100%になります。</li>
+            <li><strong>テンプレートで欄が変わる</strong>：⑨でテンプレートを切り替えると、設定項目の欄と作られるタスクが入れ替わります。</li>
+            <li><strong>しきい値を変える</strong>：⑮でしきい値を変えると、⑱判定ルールと全画面の色が変わります。</li>
+            <li><strong>スマホ幅</strong>：ブラウザを375px幅にすると、下部のタブバーに切り替わります。</li>
+          </ul>
+        </div></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'index', view: 'project' });
+
+  document.getElementById('d-today').textContent = H.formatDateY(D.today);
+  document.getElementById('d-list').innerHTML = D.allTrees().map(function (t) {
+    return '<li><a href="project.html?id=' + t.node.projectId + '">' + U.esc(t.node.name) + '</a>（' +
+      U.esc(t.node.key) + '）… ' + H.HEALTH_LABEL[t.calc.health] + ' ' + H.pct(t.calc.actualRate) +
+      '<span class="muted">／ タスク ' + t.calc.childCount + '件</span></li>';
+  }).join('') + '<li class="muted">担当者 ' + D.users.length + '人 ／ テンプレート ' + D.templates.length + '種</li>';
+})();
+</script>
+</body>
+</html>

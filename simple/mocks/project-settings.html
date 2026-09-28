@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト設定｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .row2 { grid-template-columns: 1fr; } }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .toast { position: fixed; right: 20px; bottom: 20px; padding: 10px 16px; border-radius: 10px; background: var(--text); color: var(--surface); font-size: 15px; z-index: 60; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb" id="crumb"></div>
+      <div class="page-head">
+        <div><h1>プロジェクト設定</h1><div class="sub" id="sub">—</div></div>
+        <span class="spacer"></span>
+        <div class="btn-row"><button class="btn primary" id="btn-save">保存</button></div>
+      </div>
+      <div class="tabs" id="pj-tabs" style="margin-bottom:14px"></div>
+
+      <div class="cols">
+        <div class="card">
+          <div class="card-head"><h2>基本情報</h2></div>
+          <div class="card-body">
+            <div class="field"><label for="f-name">名称</label><input id="f-name" type="text"></div>
+            <div class="field"><label for="f-desc">説明</label><textarea id="f-desc" rows="3"></textarea></div>
+            <div class="row2">
+              <div class="field"><label for="f-key">キー</label><input id="f-key" type="text">
+                <div class="help">タスクのキーの接頭辞（例：CORP-1）</div></div>
+              <div class="field"><label for="f-owner">オーナー</label><select id="f-owner"></select></div>
+            </div>
+            <div class="row2">
+              <div class="field"><label for="f-start">開始日</label><input id="f-start" type="date"></div>
+              <div class="field"><label for="f-end">終了日</label><input id="f-end" type="date"></div>
+            </div>
+            <div class="field"><label for="f-status">ステータス</label><select id="f-status"></select>
+              <div class="help">「完了」にすると、一覧の既定の表示から外れます</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>このプロジェクトの設定項目</h2></div>
+          <div class="card-body" id="custom"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-13（プロジェクト設定）</li>
+          <li>プロジェクト内のどの画面からも、タブの「設定」で開けます。編集できるのは管理者とオーナーだけです。</li>
+          <li>設定項目の欄は、作成時に選んだテンプレートの定義（F-1-3）から作られます。テンプレートを後から変えても、このプロジェクトには反映されません（F-1-9）。</li>
+          <li>完全版にあった「判定モード」「ステータス列の編集」「マイルストーン」「アーカイブ」は簡易版では持ちません。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+
+  var project = U.currentProject();
+  U.projectTabs(project, 'settings');
+  document.getElementById('sub').textContent = project.key + ' ・ ' + project.name;
+
+  document.getElementById('f-name').value = project.name;
+  document.getElementById('f-desc').value = project.description || '';
+  document.getElementById('f-key').value = project.key;
+  document.getElementById('f-start').value = project.startDate;
+  document.getElementById('f-end').value = project.endDate;
+  document.getElementById('f-owner').innerHTML = D.users.map(function (u) {
+    return '<option value="' + u.userId + '"' + (u.userId === project.ownerUserId ? ' selected' : '') + '>' +
+      U.esc(u.name) + '</option>';
+  }).join('');
+  document.getElementById('f-status').innerHTML = H.STATUS_ORDER.map(function (s) {
+    return '<option value="' + s + '"' + (s === project.status ? ' selected' : '') + '>' + H.STATUS_LABEL[s] + '</option>';
+  }).join('');
+
+  // ---- 固有項目 ----
+  var fields = project.templateId ? D.fieldsOf(project.templateId) : [];
+  var cf = project.customFields || {};
+  document.getElementById('custom').innerHTML = fields.length
+    ? fields.map(function (f) {
+        var v = cf[f.fieldKey];
+        var id = 'cf-' + f.fieldKey;
+        var input;
+        if (f.type === 'select') {
+          input = '<select id="' + id + '">' + ['<option value=""></option>'].concat(f.options.map(function (o) {
+            return '<option' + (o === v ? ' selected' : '') + '>' + U.esc(o) + '</option>';
+          })).join('') + '</select>';
+        } else if (f.type === 'checkbox') {
+          input = '<label class="small"><input type="checkbox" id="' + id + '"' + (v ? ' checked' : '') + '> はい</label>';
+        } else {
+          var t = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+          input = '<input id="' + id + '" type="' + t + '" value="' + U.esc(v === undefined || v === null ? '' : v) + '">';
+        }
+        return '<div class="field"><label for="' + id + '">' + U.esc(f.label) +
+          (f.required ? ' <span class="delay-note">必須</span>' : '') + '</label>' + input + '</div>';
+      }).join('') +
+      '<div class="help">この欄は「' + U.esc(project.templateName) + '」テンプレートの定義から作られています</div>'
+    : '<div class="empty">テンプレートを使っていないため、固有の設定項目はありません</div>';
+
+  document.getElementById('btn-save').addEventListener('click', function () {
+    var name = document.getElementById('f-name').value.trim();
+    if (!name) { alert('名称は必須です'); return; }
+    var st = document.getElementById('f-start').value, en = document.getElementById('f-end').value;
+    if (st && en && st > en) { alert('開始日が終了日より後になっています'); return; }
+    var miss = fields.filter(function (f) {
+      if (!f.required) return false;
+      var el = document.getElementById('cf-' + f.fieldKey);
+      return el && !(f.type === 'checkbox' ? el.checked : el.value);
+    });
+    if (miss.length) { alert('必須の設定項目が空です：' + miss.map(function (f) { return f.label; }).join('、')); return; }
+
+    project.name = name;
+    project.description = document.getElementById('f-desc').value;
+    project.key = document.getElementById('f-key').value;
+    project.ownerUserId = document.getElementById('f-owner').value;
+    project.status = document.getElementById('f-status').value;
+    project.startDate = st; project.endDate = en;
+    fields.forEach(function (f) {
+      var el = document.getElementById('cf-' + f.fieldKey);
+      if (!el) return;
+      cf[f.fieldKey] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? Number(el.value) : el.value);
+    });
+    project.customFields = cf;
+
+    var t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = '保存しました（モック：再読込で元に戻ります）';
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 2200);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全プロジェクトのガント｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="page-head">
+        <div><h1>全プロジェクトのガント</h1>
+          <div class="sub">全プロジェクトを1本の時間軸に並べます。行をクリックすると配下のタスクまで降りられます</div></div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <a href="projects.html">一覧</a>
+        <a href="portfolio.html" class="active" aria-current="page">ガント</a>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>ガント</h2><span class="tag" id="count">—</span>
+          <span class="spacer"></span>
+          <div class="filters">
+            <label class="small muted" for="f-scale">目盛り</label>
+            <select class="inline" id="f-scale" aria-label="日付の目盛り"><option value="week">週</option><option value="month">月</option></select>
+            <select class="inline" id="f-owner" aria-label="オーナーで絞り込み"></select>
+            <label class="small muted"><input type="checkbox" id="f-done"> 完了も表示</label>
+            <button class="btn sm" id="btn-toggle">すべて開く</button>
+          </div>
+        </div>
+        <div class="card-body tight" id="gantt"></div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none">
+          <div id="legend"></div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-17（全プロジェクトのガント）</li>
+          <li>プロジェクトの行は、配下のタスクの期間をまとめた帯です。色は状態。開くとタスクが出ます。</li>
+          <li>実装では、閉じた状態なら<strong>集計キャッシュ（50行）だけ</strong>で描けます。開いたときにそのプロジェクトのタスクを使います。</li>
+          <li>プロジェクト内の1件ずつを詳しく見るときは、プロジェクト詳細のタブ「ガント」（⑥）です。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script src="assets/gantt.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'projects', view: 'project' });
+  document.getElementById('legend').innerHTML = U.ganttLegend();
+
+  var open = {};   // projectId -> true
+  var trees = D.allTrees();
+
+  document.getElementById('f-owner').innerHTML =
+    ['<option value="">オーナー：すべて</option>']
+      .concat(D.users.map(function (u) { return '<option value="' + u.userId + '">' + U.esc(u.name) + '</option>'; })).join('');
+  ['f-scale', 'f-owner', 'f-done'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+  });
+  document.getElementById('btn-toggle').addEventListener('click', function () {
+    var anyClosed = visible().some(function (t) { return !open[t.node.projectId]; });
+    visible().forEach(function (t) { open[t.node.projectId] = anyClosed; });
+    this.textContent = anyClosed ? 'すべて閉じる' : 'すべて開く';
+    render();
+  });
+
+  function visible() {
+    var fo = document.getElementById('f-owner').value;
+    var showDone = document.getElementById('f-done').checked;
+    return trees.filter(function (t) {
+      if (!showDone && t.node.status === 'done') return false;
+      return !fo || t.node.ownerUserId === fo;
+    });
+  }
+
+  function render() {
+    var list = visible();
+    var rows = [];
+
+    list.forEach(function (t) {
+      var p = t.node, c = t.calc;
+      rows.push({
+        kind: 'group',
+        name: p.key + ' ' + p.name,
+        open: !!open[p.projectId],
+        startDate: p.startDate,
+        endDate: p.endDate,
+        calc: c,
+        href: 'project.html?id=' + p.projectId,
+        attrs: ' data-toggle="' + p.projectId + '"',
+        badgeHtml: ' ' + U.healthBadge(c.health) +
+          (c.delayedInside > 0 ? ' <span class="small delay-note">配下 ' + c.delayedInside + '</span>' : ''),
+        metaHtml: U.periodText(p.startDate, p.endDate) +
+          ' <span class="faint">・ 進捗 ' + H.pct(c.actualRate) + ' ／ 予定 ' + H.pct(c.plannedRate) +
+          ' ・ ' + U.esc(D.userName(p.ownerUserId)) + '</span>'
+      });
+
+      if (open[p.projectId]) {
+        t.children.forEach(function (task) {
+          rows.push({
+            name: task.node.name,
+            itemType: task.node.itemType,
+            itemKey: task.node.itemKey,
+            level: 1,
+            startDate: task.node.startDate,
+            endDate: task.node.endDate,
+            calc: task.calc,
+            href: 'task-edit.html?id=' + task.node.itemId,
+            tag: D.userName(task.node.assigneeUserId)
+          });
+        });
+      }
+    });
+
+    document.getElementById('count').textContent = list.length + ' プロジェクト';
+    document.getElementById('gantt').innerHTML = U.ganttHtml(rows, {
+      today: D.today,
+      scale: document.getElementById('f-scale').value,
+      labelHead: 'プロジェクト ／ タスク（期間）',
+      emptyText: '条件に合うプロジェクトがありません'
+    });
+
+    document.querySelectorAll('.g-row[data-toggle]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;   // 名前のリンクは素通し
+        var id = this.getAttribute('data-toggle');
+        open[id] = !open[id];
+        render();
+      });
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

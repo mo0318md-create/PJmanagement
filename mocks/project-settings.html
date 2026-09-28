@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プロジェクト設定｜PJ管理</title>
+<link rel="stylesheet" href="assets/mock.css">
+<style>
+  .st-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 160px 90px; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); }
+  .ms-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1fr) 110px 90px; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); }
+  .danger-zone { border: 1px solid color-mix(in srgb, var(--h-delayed) 35%, transparent); }
+  @media (max-width: 700px) {
+    .st-row { grid-template-columns: 20px minmax(0, 1fr) 96px; }
+    .st-row > span:last-child { grid-column: 2 / -1; }
+    .ms-row { grid-template-columns: minmax(0, 1fr) 140px; }
+    .ms-row > input[aria-label="メモ"], .ms-row > span { grid-column: 1 / -1; }
+  }
+  .saved-toast { position: fixed; right: 20px; bottom: 20px; padding: 10px 16px; border-radius: 10px; background: var(--text); color: var(--surface); font-size: 13px; z-index: 60; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+
+      <div class="breadcrumb" id="crumb">—</div>
+      <div class="page-head">
+        <div>
+          <h1 id="title">プロジェクト設定</h1>
+          <div class="sub">このプロジェクトだけの設定です。テンプレートを直しても、作成済みのプロジェクトには影響しません</div>
+        </div>
+        <span class="spacer"></span>
+        <a class="btn" id="btn-back" href="#">詳細に戻る</a>
+        <button class="btn primary" id="btn-save">保存</button>
+      </div>
+
+      <div id="archived-banner"></div>
+
+      <div class="grid2" style="align-items:start">
+        <!-- 基本情報 -->
+        <div class="card">
+          <div class="card-head"><h2>基本情報</h2></div>
+          <div class="card-body">
+            <div class="field"><label for="f-name">名称<span class="req">必須</span></label><input type="text" id="f-name"></div>
+            <div class="field"><label for="f-desc">説明</label><textarea id="f-desc"></textarea></div>
+            <div class="grid2">
+              <div class="field"><label for="f-owner">オーナー</label><select id="f-owner"></select></div>
+              <div class="field"><label for="f-mode">判定モード</label><select id="f-mode"></select><div class="help" id="mode-help">—</div></div>
+              <div class="field"><label for="f-start">開始日</label><input type="date" id="f-start"></div>
+              <div class="field"><label for="f-end">終了日</label><input type="date" id="f-end"></div>
+            </div>
+            <div class="help" id="date-help">—</div>
+            <div class="small muted" style="margin-top:8px">生成元テンプレート：<span id="f-tpl">—</span>（参照のみ）</div>
+          </div>
+        </div>
+
+        <!-- 固有の設定項目 -->
+        <div class="card">
+          <div class="card-head"><h2>固有の設定項目</h2><span class="tag" id="fields-tpl">—</span></div>
+          <div class="card-body" id="fields"></div>
+        </div>
+      </div>
+
+      <!-- ステータス列 -->
+      <div class="card">
+        <div class="card-head">
+          <h2>ステータス列</h2>
+          <span class="small muted">作成時にテンプレートからコピーしたもの。ここで直すのはこのプロジェクトだけです</span>
+          <span class="spacer"></span>
+          <button class="btn sm" id="st-add">＋ 列を追加</button>
+        </div>
+        <div class="card-body" id="statuses"></div>
+      </div>
+
+      <!-- マイルストーン -->
+      <div class="card">
+        <div class="card-head">
+          <h2>マイルストーン</h2>
+          <span class="chip" id="ms-cnt">—</span>
+          <span class="spacer"></span>
+          <button class="btn sm" id="ms-add">＋ マイルストーンを追加</button>
+        </div>
+        <div class="card-body" id="milestones"></div>
+        <div class="card-head small muted" style="border-top:1px solid var(--border);border-bottom:none">
+          タスクをマイルストーンに紐づけるのは、タスクの編集画面の「マイルストーン」から行います。期日を過ぎても紐づくタスクが残っていると「期日超過」になります。
+        </div>
+      </div>
+
+      <div class="grid2" style="align-items:start">
+        <!-- 当初計画 -->
+        <div class="card">
+          <div class="card-head"><h2>当初計画</h2><span id="plan-badge"></span></div>
+          <div class="card-body small" id="plan-body">—</div>
+        </div>
+
+        <!-- アーカイブ -->
+        <div class="card danger-zone">
+          <div class="card-head"><h2>アーカイブ</h2></div>
+          <div class="card-body small" id="archive-body">—</div>
+        </div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-3-13（プロジェクト設定）／F-3-14（マイルストーン）／F-3-10（アーカイブ）。プロジェクト詳細・概要の「プロジェクト設定」からここに来ます（以前はテンプレート編集に飛んでいたのを修正）。</li>
+          <li>編集できるのは管理者とオーナーだけ。担当者には読み取り専用で表示します（モックでは全員編集可）。</li>
+          <li>開始日・終了日を変えても当初計画は変わりません。確定後に変えると当初比に出ます（当初計画の引き直しはプロジェクト詳細の「当初計画」から）。</li>
+          <li>ステータス列を消すとき、その列にタスクが残っていれば移し先を選ばせます（モックでは件数を表示して確認だけ）。分類（未着手／進行中／保留／完了）は判定に使うので必須です。</li>
+          <li>アーカイブすると一覧・負荷・横断検索から外れます。データは消えず、「アーカイブも表示」でいつでも見られ、解除もできます。</li>
+          <li>モックでは保存しても画面上だけで変わります（再読込で元に戻ります）。</li>
+        </ul>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="assets/health.js"></script>
+<script src="assets/mock-data.js"></script>
+<script src="assets/mock-ui.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  var me = U.renderShell({ active: 'dashboard', view: 'project' });
+
+  var project = D.projectById(U.qs('id', 'p1')) || D.projects[0];
+  var tpl = D.templateById(project.templateId);
+  var statuses = (project.statuses || H.statusesOf(project)).map(function (s) { return Object.assign({}, s); });
+  var CAT = { not_started: '未着手', in_progress: '進行中', on_hold: '保留', done: '完了' };
+
+  document.getElementById('crumb').innerHTML = '<a href="dashboard-manager.html">プロジェクト一覧</a> ／ ' +
+    '<a href="project-detail.html?id=' + project.projectId + '">' + U.esc(project.name) + '</a> ／ 設定';
+  document.getElementById('title').textContent = project.name + ' の設定';
+  document.getElementById('btn-back').href = 'project-detail.html?id=' + project.projectId;
+
+  // ---- 基本情報 ----
+  document.getElementById('f-name').value = project.name;
+  document.getElementById('f-desc').value = project.description || '';
+  document.getElementById('f-owner').innerHTML = D.users.map(function (u) {
+    return '<option value="' + u.userId + '"' + (u.userId === project.ownerUserId ? ' selected' : '') + '>' + U.esc(u.name) + '</option>';
+  }).join('');
+  var fMode = document.getElementById('f-mode');
+  var curMode = project.progressMode || '';
+  try { var sv = sessionStorage.getItem('pj-mode:' + project.projectId); if (sv !== null) curMode = sv; } catch (e) { /* 無視 */ }
+  fMode.innerHTML = '<option value="">システムの既定（' + H.MODE_LABEL[D.settings.defaultProgressMode] + '）</option>' +
+    ['auto', 'manual', 'deadline'].map(function (m) {
+      return '<option value="' + m + '"' + (curMode === m ? ' selected' : '') + '>' + H.MODE_LABEL[m] + '</option>';
+    }).join('');
+  function modeHelp() { document.getElementById('mode-help').textContent = H.MODE_DESC[fMode.value || D.settings.defaultProgressMode]; }
+  fMode.addEventListener('change', modeHelp); modeHelp();
+  document.getElementById('f-start').value = project.startDate;
+  document.getElementById('f-end').value = project.endDate;
+  document.getElementById('f-tpl').textContent = project.templateName || '—';
+  function dateHelp() {
+    var st = project.planStatus === 'fixed';
+    document.getElementById('date-help').innerHTML = st
+      ? '計画は確定済みです。日付を変えると<strong>当初比</strong>に出ます（当初計画は変わりません）。'
+      : '計画中です。日付は自由に直せます（当初比には出ません）。';
+  }
+  dateHelp();
+
+  // ---- 固有の設定項目（テンプレートの定義に沿って入力欄を出す） ----
+  document.getElementById('fields-tpl').textContent = project.templateName || 'テンプレートなし';
+  var cf = project.customFields || {};
+  document.getElementById('fields').innerHTML = (tpl && tpl.fields && tpl.fields.length) ? tpl.fields.map(function (f) {
+    var v = cf[f.fieldKey];
+    var id = 'cf-' + f.fieldKey, input;
+    if (f.type === 'select') {
+      input = '<select id="' + id + '">' + f.options.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + U.esc(o) + '</option>'; }).join('') + '</select>';
+    } else if (f.type === 'checkbox') {
+      input = '<label class="check-line"><input type="checkbox" id="' + id + '"' + (v ? ' checked' : '') + '> はい</label>';
+    } else {
+      input = '<input type="' + (f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text')) + '" id="' + id + '" value="' + U.esc(v === undefined || v === null ? '' : v) + '">';
+    }
+    return '<div class="field"><label for="' + id + '">' + U.esc(f.label) + (f.required ? '<span class="req">必須</span>' : '') + '</label>' + input +
+      (f.helpText ? '<div class="help">' + U.esc(f.helpText) + '</div>' : '') + '</div>';
+  }).join('') : '<div class="empty">このプロジェクトには固有の設定項目がありません</div>';
+
+  // ---- ステータス列 ----
+  function renderStatuses() {
+    var items = D.itemsOfProject(project.projectId);
+    document.getElementById('statuses').innerHTML =
+      '<div class="st-row small muted" style="border-top:none"><span></span><span>名前</span><span>分類（判定に使う）</span><span></span></div>' +
+      statuses.map(function (s, i) {
+        var used = items.filter(function (it) { return it.statusKey === s.key; }).length;
+        return '<div class="st-row"><span class="small faint num">' + (i + 1) + '</span>' +
+          '<input type="text" class="inline" value="' + U.esc(s.label) + '" data-st-label="' + i + '" aria-label="ステータス名">' +
+          '<select class="inline" data-st-cat="' + i + '" aria-label="分類">' + Object.keys(CAT).map(function (k) {
+            return '<option value="' + k + '"' + (s.category === k ? ' selected' : '') + '>' + CAT[k] + '</option>';
+          }).join('') + '</select>' +
+          '<span><button class="btn ghost sm" data-st-del="' + i + '"' + (statuses.length <= 2 ? ' disabled' : '') + '>削除</button>' +
+          (used ? ' <span class="small faint">' + used + '件</span>' : '') + '</span></div>';
+      }).join('');
+    document.querySelectorAll('[data-st-label]').forEach(function (el) {
+      el.addEventListener('change', function () { statuses[+el.getAttribute('data-st-label')].label = el.value; });
+    });
+    document.querySelectorAll('[data-st-cat]').forEach(function (el) {
+      el.addEventListener('change', function () { statuses[+el.getAttribute('data-st-cat')].category = el.value; });
+    });
+    document.querySelectorAll('[data-st-del]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var i = +b.getAttribute('data-st-del'), s = statuses[i];
+        var used = items.filter(function (it) { return it.statusKey === s.key; }).length;
+        if (used && !confirm('「' + s.label + '」には ' + used + ' 件のタスクがあります。実装では移し先を選んでから削除します。削除しますか？')) return;
+        statuses.splice(i, 1); renderStatuses();
+      });
+    });
+  }
+  document.getElementById('st-add').addEventListener('click', function () {
+    statuses.splice(statuses.length - 1, 0, { key: 'st' + Date.now(), label: '新しい列', category: 'in_progress', color: 'gray', order: 0 });
+    renderStatuses();
+  });
+  renderStatuses();
+
+  // ---- マイルストーン ----
+  function msState(m) {
+    var linked = D.itemsOfProject(project.projectId).filter(function (it) { return it.milestoneId === m.milestoneId; });
+    var open = linked.filter(function (it) { return H.statusCategory(project, it.statusKey) !== 'done'; }).length;
+    if (linked.length && !open) return { label: '達成', cls: 'done', linked: linked.length };
+    if (m.date < D.today && open) return { label: '期日超過', cls: 'delayed', linked: linked.length };
+    return { label: 'あと' + H.diffDays(D.today, m.date) + '日', cls: 'on_track', linked: linked.length };
+  }
+  function renderMilestones() {
+    var list = D.milestonesOf(project.projectId);
+    document.getElementById('ms-cnt').textContent = list.length + ' 件';
+    document.getElementById('milestones').innerHTML = list.length
+      ? '<div class="ms-row small muted" style="border-top:none"><span>名前</span><span>期日</span><span>メモ</span><span>状態</span><span></span></div>' +
+        list.map(function (m) {
+          var st = msState(m);
+          return '<div class="ms-row">' +
+            '<input type="text" class="inline" value="' + U.esc(m.name) + '" data-ms-name="' + m.milestoneId + '" aria-label="名前">' +
+            '<input type="date" class="inline" value="' + m.date + '" data-ms-date="' + m.milestoneId + '" aria-label="期日">' +
+            '<input type="text" class="inline" value="' + U.esc(m.note || '') + '" data-ms-note="' + m.milestoneId + '" aria-label="メモ" placeholder="メモ">' +
+            '<span><span class="badge ' + st.cls + '">' + st.label + '</span> <span class="small faint">' + st.linked + '件</span></span>' +
+            '<span><button class="btn ghost sm" data-ms-del="' + m.milestoneId + '">削除</button></span></div>';
+        }).join('')
+      : '<div class="empty">マイルストーンはまだありません</div>';
+    function find(id) { return D.milestones.filter(function (m) { return m.milestoneId === id; })[0]; }
+    document.querySelectorAll('[data-ms-name]').forEach(function (el) { el.addEventListener('change', function () { find(el.getAttribute('data-ms-name')).name = el.value; }); });
+    document.querySelectorAll('[data-ms-date]').forEach(function (el) { el.addEventListener('change', function () { find(el.getAttribute('data-ms-date')).date = el.value; renderMilestones(); }); });
+    document.querySelectorAll('[data-ms-note]').forEach(function (el) { el.addEventListener('change', function () { find(el.getAttribute('data-ms-note')).note = el.value; }); });
+    document.querySelectorAll('[data-ms-del]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-ms-del');
+        var linked = D.items.filter(function (it) { return it.milestoneId === id; }).length;
+        if (linked && !confirm(linked + ' 件のタスクが紐づいています。紐づけを外して削除しますか？')) return;
+        D.items.forEach(function (it) { if (it.milestoneId === id) it.milestoneId = null; });
+        D.milestones.splice(D.milestones.indexOf(find(id)), 1);
+        renderMilestones();
+      });
+    });
+  }
+  document.getElementById('ms-add').addEventListener('click', function () {
+    D.milestones.push({ milestoneId: 'm' + Date.now(), projectId: project.projectId, name: '新しいマイルストーン', date: project.endDate, note: '' });
+    renderMilestones();
+  });
+  renderMilestones();
+
+  // ---- 当初計画 ----
+  var bl = D.baselinesOf(project.projectId);
+  document.getElementById('plan-badge').innerHTML = project.planStatus === 'fixed'
+    ? '<span class="badge on_track">確定済み</span>' : '<span class="badge not_started">計画中</span>';
+  document.getElementById('plan-body').innerHTML = (project.planStatus === 'fixed'
+    ? '最新は第' + bl[bl.length - 1].version + '版（' + H.formatDate(bl[bl.length - 1].setAt) + '）。'
+    : 'まだ当初計画はありません。') +
+    ' 確定・引き直し・版の比較は <a href="project-detail.html?id=' + project.projectId + '#bl-card">プロジェクト詳細の「当初計画」</a> で行います。';
+
+  // ---- アーカイブ ----
+  function renderArchive() {
+    var cat = H.statusCategory(project, project.statusKey);
+    document.getElementById('archived-banner').innerHTML = project.archived
+      ? '<div class="callout warn small" style="margin-bottom:14px">このプロジェクトはアーカイブ済みです。一覧・負荷・横断検索には出ません。</div>' : '';
+    document.getElementById('archive-body').innerHTML = project.archived
+      ? '<p style="margin:0 0 10px">アーカイブ済みです。解除すると一覧・負荷・横断検索に戻ります。</p><button class="btn" id="btn-arc">アーカイブを解除</button>'
+      : '<p style="margin:0 0 10px">終わったプロジェクトを一覧・負荷・横断検索から外します。データは消えず、あとで解除できます。' +
+        (cat !== 'done' ? '<br><strong style="color:var(--h-at-risk)">まだ完了していません。</strong>未完了のタスクも一緒に一覧から外れます。' : '') +
+        '</p><button class="btn danger" id="btn-arc">アーカイブする</button>';
+    document.getElementById('btn-arc').addEventListener('click', function () {
+      if (!project.archived && !confirm('「' + project.name + '」をアーカイブしますか？')) return;
+      project.archived = !project.archived;
+      renderArchive();
+    });
+  }
+  renderArchive();
+
+  // ---- 保存（モック：画面上だけ） ----
+  document.getElementById('btn-save').addEventListener('click', function () {
+    var name = document.getElementById('f-name').value.trim();
+    if (!name) { alert('名称は必須です'); return; }
+    var st = document.getElementById('f-start').value, en = document.getElementById('f-end').value;
+    if (st && en && st > en) { alert('開始日が終了日より後になっています'); return; }
+    project.name = name;
+    project.description = document.getElementById('f-desc').value;
+    project.ownerUserId = document.getElementById('f-owner').value;
+    project.progressMode = fMode.value || null;
+    try { sessionStorage.setItem('pj-mode:' + project.projectId, fMode.value); } catch (e) { /* 無視 */ }
+    project.startDate = st; project.endDate = en;
+    project.statuses = statuses;
+    if (tpl && tpl.fields) tpl.fields.forEach(function (f) {
+      var el = document.getElementById('cf-' + f.fieldKey);
+      if (!el) return;
+      cf[f.fieldKey] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? Number(el.value) : el.value);
+    });
+    project.customFields = cf;
+    var t = document.createElement('div');
+    t.className = 'saved-toast'; t.textContent = '保存しました（モック：判定モードは他の画面にも反映。ほかは再読込で元に戻ります）';
+    document.body.appendChild(t);
+    setTimeout(function () { t.remove(); }, 2200);
+  });
+})();
+</script>
+</body>
+</html>

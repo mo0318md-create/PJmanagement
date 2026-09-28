@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>個人ページ｜PJ管理（簡易版）</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  .cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 960px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .grp-head { padding: 9px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar" id="topbar"></header>
+  <div class="body">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main class="main">
+      <div class="breadcrumb"><a href="people.html">担当者一覧</a> ／ <span id="crumb-name">—</span></div>
+      <div class="page-head">
+        <div><h1 id="title">—</h1><div class="sub" id="sub"></div></div>
+        <span class="spacer"></span>
+        <div class="filters">
+          <label class="small muted" for="f-user">担当者</label>
+          <select class="inline" id="f-user"></select>
+        </div>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="cols">
+        <div class="card">
+          <div class="card-head"><h2>担当タスク</h2><span class="tag" id="t-count">—</span>
+            <span class="spacer"></span>
+            <label class="small muted"><input type="checkbox" id="f-done"> 完了も表示</label>
+          </div>
+          <div class="card-body tight" id="tasks"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>関わっているプロジェクト</h2></div>
+          <div class="card-body tight" id="projects"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-head"><h2>担当分のガント</h2>
+          <span class="spacer"></span>
+          <label class="small muted" for="f-scale">目盛り</label>
+          <select class="inline" id="f-scale" aria-label="日付の目盛り"><option value="week">週</option><option value="month">月</option></select></div>
+        <div class="card-body tight" id="gantt"></div>
+        <div class="card-head" style="border-top:1px solid var(--border);border-bottom:none"><div id="legend"></div></div>
+      </div>
+
+      <div class="mock-note">
+        <h4>この画面の検討メモ</h4>
+        <ul>
+          <li>対応要件: F-4-8（個人ページ）</li>
+          <li>件数の数え方は担当者一覧（F-4-13）とそろえています。2つの画面で数字が食い違わないようにするためです。</li>
+          <li>管理者は上の「担当者」で他の人のページも開けます。自分の分は「マイタスク」からも開けます。</li>
+        </ul>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="assets/health.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/ui.js"></script>
+<script src="assets/gantt.js"></script>
+<script>
+(function () {
+  'use strict';
+  var H = window.Health, D = window.MockData, U = window.UI;
+  U.renderShell({ active: 'people', view: 'people' });
+
+  var q = new URLSearchParams(location.search);
+  var userId = q.get('user') || D.meUserId;
+  var user = D.userById(userId) || D.me();
+  userId = user.userId;
+
+  document.getElementById('f-user').innerHTML = D.users.map(function (u) {
+    return '<option value="' + u.userId + '"' + (u.userId === userId ? ' selected' : '') + '>' + U.esc(u.name) + '</option>';
+  }).join('');
+  document.getElementById('f-user').addEventListener('change', function () {
+    location.href = 'member.html?user=' + this.value;
+  });
+
+  document.getElementById('title').textContent = user.name + ' さんの状況';
+  document.getElementById('crumb-name').textContent = user.name;
+  document.getElementById('sub').textContent =
+    user.email + (user.role === 'admin' ? ' ・ 管理者' : ' ・ 担当者') +
+    (userId === D.meUserId ? '（自分）' : '');
+  document.getElementById('legend').innerHTML = U.ganttLegend();
+
+  // ---- 担当タスク（数える単位＝子タスク、または子を持たないタスク）----
+  var mine = [];
+  var projectsInvolved = {};
+  D.allTrees().forEach(function (t) {
+    H.flatten(t).forEach(function (r) {
+      if (r.calc.hasChildren) return;
+      if (r.node.assigneeUserId !== userId) return;
+      mine.push({ node: r.node, calc: r.calc, project: t.node });
+      projectsInvolved[t.node.projectId] = t;
+    });
+  });
+
+  var open = mine.filter(function (m) { return m.node.status !== 'done'; });
+  document.getElementById('stats').innerHTML = [
+    ['delayed', '遅延', open.filter(function (m) { return m.calc.health === 'delayed'; }).length],
+    ['at_risk', '今日期限', open.filter(function (m) { return U.dueGroup(m.node, m.calc) === 'today'; }).length],
+    ['on_track', '今週', open.filter(function (m) { return U.dueGroup(m.node, m.calc) === 'week'; }).length],
+    ['not_started', '未完了', open.length],
+    ['done', '完了', mine.length - open.length]
+  ].map(function (r) {
+    return '<div class="stat ' + r[0] + '"><div class="label">' + r[1] + '</div>' +
+      '<div class="value">' + r[2] + '<span class="unit">件</span></div></div>';
+  }).join('');
+
+  // ---- 区分ごとのタスク ----
+  document.getElementById('f-done').addEventListener('change', renderTasks);
+
+  var COLS = '<colgroup><col><col style="width:250px"><col style="width:150px">' +
+    '<col style="width:118px"><col style="width:110px"></colgroup>';
+
+  function renderTasks() {
+    var showDone = document.getElementById('f-done').checked;
+    var list = showDone ? mine : open;
+    document.getElementById('t-count').textContent = list.length + ' 件';
+
+    var order = ['delayed', 'today', 'week', 'later', 'done'];
+    var groups = order.map(function (k) {
+      return { k: k, rows: list.filter(function (m) { return U.dueGroup(m.node, m.calc) === k; }) };
+    }).filter(function (g) { return g.rows.length; });
+
+    document.getElementById('tasks').innerHTML = groups.length
+      ? groups.map(function (g) {
+          return '<div class="grp-head">' + U.DUE_LABEL[g.k] + '<span class="tag">' + g.rows.length + '</span></div>' +
+            '<table class="tbl fixed">' + COLS + '<tbody>' + g.rows.map(function (m) {
+              return '<tr>' +
+                '<td>' + U.taskCell(m.node, { project: true, parent: true }) + '</td>' +
+                '<td class="small" style="white-space:nowrap">' + U.periodText(m.node.startDate, m.node.endDate) + '</td>' +
+                '<td style="min-width:120px">' + U.progressBar(m.calc) + '</td>' +
+                '<td class="small" style="white-space:nowrap">' + U.dueText(m.calc) + '</td>' +
+                '<td>' + U.healthBadge(m.calc.health) + '</td></tr>';
+            }).join('') + '</tbody></table>';
+        }).join('')
+      : '<div class="empty">担当しているタスクがありません</div>';
+  }
+
+  // ---- 関わっているプロジェクト ----
+  var pids = Object.keys(projectsInvolved);
+  document.getElementById('projects').innerHTML = pids.length
+    ? '<table class="tbl"><tbody>' + pids.map(function (pid) {
+        var t = projectsInvolved[pid];
+        var n = mine.filter(function (m) { return m.project.projectId === pid && m.node.status !== 'done'; }).length;
+        return '<tr><td><a class="row-link" href="project.html?id=' + pid + '">' + U.esc(t.node.name) + '</a>' +
+          '<div class="small muted">自分の未完了 ' + n + ' 件</div></td>' +
+          '<td>' + U.healthBadge(t.calc.health) + '</td></tr>';
+      }).join('') + '</tbody></table>'
+    : '<div class="empty">関わっているプロジェクトがありません</div>';
+
+  // ---- 担当分のガント ----
+  document.getElementById('f-scale').addEventListener('change', renderGantt);
+  function renderGantt() {
+  document.getElementById('gantt').innerHTML = U.ganttHtml(
+    open.filter(function (m) { return m.node.startDate && m.node.endDate; })
+      .sort(function (a, b) { return a.node.startDate.localeCompare(b.node.startDate); })
+      .map(function (m) {
+        return {
+          name: m.node.name, itemType: m.node.itemType, itemKey: m.node.itemKey, level: 1,
+          startDate: m.node.startDate, endDate: m.node.endDate, calc: m.calc,
+          href: 'task-edit.html?id=' + m.node.itemId,
+          tag: m.project.key
+        };
+      }),
+    { today: D.today, scale: document.getElementById('f-scale').value,
+      labelHead: 'タスク（期間）', emptyText: '期間が入った未完了のタスクがありません' });
+  }
+
+  renderGantt();
+  renderTasks();
+})();
+</script>
+</body>
+</html>
