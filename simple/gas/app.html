@@ -15,7 +15,11 @@
     today: '', me: null, users: [], projects: [], summary: {}, templates: [], settings: {},
     items: null,              // null = まだ読み込み中
     view: 'projects', projectId: null, tab: 'overview',
-    collapsed: {}, unread: 0
+    collapsed: {}, unread: 0,
+    // 一覧の絞り込み（F-3-3）と並び順（F-3-4）
+    pf: { health: '', owner: '', tpl: '', sort: 'delayed', done: false },
+    // 概要の絞り込み（F-3-9）
+    df: { delayedOnly: false }
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -119,6 +123,8 @@
     if (edit) { openTaskEditor(edit.getAttribute('data-edit'), null); return; }
     var add = e.target.closest('[data-add]');
     if (add) { openTaskEditor(null, add.getAttribute('data-add')); return; }
+    var sub = e.target.closest('[data-addsub]');
+    if (sub) { openSubTaskEditor(sub.getAttribute('data-addsub')); return; }
     var tg = e.target.closest('[data-toggle]');
     if (tg) { var k = tg.getAttribute('data-toggle'); S.collapsed[k] = !S.collapsed[k]; render(); return; }
   });
@@ -263,9 +269,22 @@
       else open++;
     });
 
-    var rows = S.projects.slice().sort(function (a, b) {
+    var HR = { delayed: 0, no_period: 1, on_track: 2, not_started: 3, done: 4 };
+    var shown = S.projects.filter(function (p) {
+      var c = S.summary[p.project_id] || {};
+      if (!S.pf.done && (p.status === 'done' || c.health === 'done')) return false;
+      if (S.pf.health && c.health !== S.pf.health) return false;
+      if (S.pf.owner && p.owner_user_id !== S.pf.owner) return false;
+      if (S.pf.tpl === '@none' ? !!p.template_id : (S.pf.tpl && p.template_id !== S.pf.tpl)) return false;
+      return true;
+    });
+
+    var rows = shown.slice().sort(function (a, b) {
       var ca = S.summary[a.project_id] || {}, cb = S.summary[b.project_id] || {};
-      return (cb.delayed_count || 0) - (ca.delayed_count || 0);
+      if (S.pf.sort === 'name') return String(a.name).localeCompare(String(b.name), 'ja');
+      if (S.pf.sort === 'due') return String(a.end_date || '9999').localeCompare(String(b.end_date || '9999'));
+      var d = (HR[ca.health] === undefined ? 9 : HR[ca.health]) - (HR[cb.health] === undefined ? 9 : HR[cb.health]);
+      return d !== 0 ? d : (cb.delayed_count || 0) - (ca.delayed_count || 0);
     }).map(function (p) {
       var c = S.summary[p.project_id] || { health: 'no_period', actual_rate: 0, planned_rate: 0, delayed_count: 0 };
       var calc = {
@@ -291,17 +310,29 @@
         delayedTasks ? '<span class="late">遅延しているタスクが ' + delayedTasks + ' 件</span>あります（' + pjWithDelay + ' プロジェクト）'
                      : '遅れているタスクはありません',
         '<button class="btn primary" data-nav="new">＋ プロジェクトを作成</button>') +
-      '<div class="toolbar"><span class="label">対応中</span><span class="count">' + open + ' 件</span>' +
-        '<span class="label">開始前</span><span class="count">' + notStarted + ' 件</span>' +
-        '<span class="label">完了</span><span class="count">' + done + ' 件</span>' +
-        '<span class="spacer"></span><span class="count">プロジェクト ' + S.projects.length + ' 件</span></div>' +
+      '<div class="toolbar">' +
+        '<span class="label">状態</span><select class="inline" id="f-health">' +
+          optionList([['', 'すべて'], ['delayed', '遅延'], ['on_track', '対応中'],
+                      ['not_started', '開始前'], ['done', '完了']], S.pf.health) + '</select>' +
+        '<span class="label">オーナー</span><select class="inline" id="f-owner">' +
+          optionList([['', 'すべて']].concat(S.users.map(function (u) { return [u.user_id, u.name]; })), S.pf.owner) + '</select>' +
+        '<span class="label">テンプレート</span><select class="inline" id="f-tpl">' +
+          optionList([['', 'すべて'], ['@none', 'テンプレートなし']].concat(
+            S.templates.map(function (t) { return [t.template_id, t.name]; })), S.pf.tpl) + '</select>' +
+        '<span class="label">並び順</span><select class="inline" id="f-sort">' +
+          optionList([['delayed', '遅延している順'], ['due', '期限が近い順'], ['name', '名前順']], S.pf.sort) + '</select>' +
+        '<label class="label" style="cursor:pointer"><input type="checkbox" id="f-done"' +
+          (S.pf.done ? ' checked' : '') + '> 完了も表示</label>' +
+        '<span class="spacer"></span><span class="count">' + rows.length + ' / ' + S.projects.length + ' 件</span></div>' +
       '<section class="card"><div class="tbl-wrap">' +
-        (S.projects.length
+        (rows.length
           ? '<table class="tbl"><colgroup><col><col style="width:128px"><col style="width:190px">' +
             '<col class="col-hide" style="width:128px"><col class="col-hide" style="width:140px"></colgroup>' +
             '<thead><tr><th>プロジェクト</th><th>状態</th><th>進捗</th>' +
             '<th class="col-hide">期限まで</th><th class="col-hide">オーナー</th></tr></thead><tbody>' + rows + '</tbody></table>'
-          : '<div class="empty">プロジェクトがありません。「＋ プロジェクトを作成」から作ってください</div>') +
+          : '<div class="empty">' + (S.projects.length
+              ? '条件に合うプロジェクトがありません'
+              : 'プロジェクトがありません。「＋ プロジェクトを作成」から作ってください') + '</div>') +
       '</div></section>';
   }
 
@@ -328,9 +359,12 @@
 
     var rows = '';
     tree.children.forEach(function (t) {
+      var kids = t.children.filter(function (s) { return !S.df.delayedOnly || s.calc.health === 'delayed'; });
+      if (S.df.delayedOnly && t.calc.health !== 'delayed' && !kids.length) return;
       rows += treeRow(t, 1, t.children.length > 0);
-      if (!S.collapsed[t.node.item_id]) t.children.forEach(function (s) { rows += treeRow(s, 2, false); });
+      if (!S.collapsed[t.node.item_id]) kids.forEach(function (s) { rows += treeRow(s, 2, false); });
     });
+    var anyOpen = tree.children.some(function (t) { return !S.collapsed[t.node.item_id]; });
 
     return '<div class="breadcrumb"><a data-nav="projects">プロジェクト一覧</a> ／ ' + esc(p.name) + '</div>' +
       head(p.name, esc(p.key) + ' ・ ' + esc(p.template_name || 'テンプレートなし') + ' ・ ' + esc(userName(p.owner_user_id)),
@@ -345,6 +379,9 @@
           '<span class="label">予定</span><span class="count">' + H.pct(c.plannedRate) + '（参考）</span>' +
           '<span class="label">期限まで</span><span class="count">' + dueText(c) + '</span>' +
           '<span class="spacer"></span>' +
+          '<label class="label" style="cursor:pointer"><input type="checkbox" id="d-delayed"' +
+            (S.df.delayedOnly ? ' checked' : '') + '> 遅延だけ表示</label>' +
+          '<button class="btn sm" id="d-toggle">' + (anyOpen ? 'すべて折りたたむ' : 'すべて開く') + '</button>' +
           '<span class="count">タスク ' + c.doneCount + ' / ' + c.childCount + ' 完了（子 ' + subDone + ' / ' + subTotal + '）</span>' +
         '</div>' +
         '<section class="card"><div class="tbl-wrap">' +
@@ -365,6 +402,9 @@
         typeChip(node.item_type) +
         '<span class="link" data-edit="' + esc(node.item_id) + '">' + esc(node.name) + '</span>' +
         (calc.delayedInside > 0 ? ' <span class="late">配下 ' + calc.delayedInside + '</span>' : '') +
+        (level === 1
+          ? ' <a class="add-sub" data-addsub="' + esc(node.item_id) + '" title="このタスクの下に子タスクを作る">＋ 子タスク</a>'
+          : '') +
       '</div>' +
       '<div>' + badge(calc.health) + '</div>' +
       '<div class="col-hide">' + progBar(calc) + '</div>' +
@@ -413,7 +453,10 @@
           ' <a class="t" data-edit="' + esc(m.node.item_id) + '" style="display:inline">' + esc(m.node.name) + '</a>' +
           '<span class="s">' + esc(m.node.item_key) + ' ・ ' + esc(m.project.key) + ' ' + esc(m.project.name) + '</span></div></td>' +
         '<td class="col-hide">' + periodText(m.node.start_date, m.node.end_date) + '</td>' +
-        '<td>' + progBar(m.calc) + '</td>' +
+        '<td><select class="inline" data-status="' + esc(m.node.item_id) + '" aria-label="ステータス">' +
+          optionList(H.STATUS_ORDER.map(function (k) { return [k, H.STATUS_LABEL[k]]; }), m.node.status) + '</select></td>' +
+        '<td style="white-space:nowrap"><input class="inline" type="number" min="0" max="100" step="5" style="width:78px;text-align:right"' +
+          ' data-rate="' + esc(m.node.item_id) + '" value="' + Math.round(m.calc.actualRate * 100) + '" aria-label="進捗率"> %</td>' +
         '<td>' + dueText(m.calc) + '</td>' +
         '<td>' + badge(m.calc.health) + '</td></tr>';
     }).join('');
@@ -427,9 +470,10 @@
       '<div class="toolbar"><span class="spacer"></span><span class="count">タスク ' + by[tab].length + ' 件</span></div>' +
       '<section class="card"><div class="tbl-wrap">' +
         (by[tab].length
-          ? '<table class="tbl"><colgroup><col><col class="col-hide" style="width:240px"><col style="width:180px">' +
-            '<col style="width:128px"><col style="width:120px"></colgroup>' +
-            '<thead><tr><th>タスク</th><th class="col-hide">期間</th><th>進捗</th><th>期限</th><th>状態</th></tr></thead>' +
+          ? '<table class="tbl"><colgroup><col><col class="col-hide" style="width:230px"><col style="width:132px">' +
+            '<col style="width:126px"><col style="width:120px"><col style="width:112px"></colgroup>' +
+            '<thead><tr><th>タスク</th><th class="col-hide">期間</th><th>ステータス</th><th>進捗率</th>' +
+            '<th>期限</th><th>状態</th></tr></thead>' +
             '<tbody>' + rows + '</tbody></table>'
           : '<div class="empty">この区分のタスクはありません</div>') +
       '</div></section>';
@@ -465,7 +509,12 @@
     var list = S.users.map(function (u) { return { name: u.name, mail: u.email, s: stats(u.user_id) }; });
     var none = stats(null);
     if (none.open + none.done > 0) list.push({ name: '未アサイン', mail: '担当を決める必要があります', s: none, none: true });
-    list.sort(function (a, b) { return b.s.delayed - a.s.delayed || b.s.open - a.s.open; });
+    var ps = S.peopleSort || 'delayed';
+    list.sort(function (a, b) {
+      if (ps === 'name') return String(a.name).localeCompare(String(b.name), 'ja');
+      if (ps === 'open') return b.s.open - a.s.open;
+      return b.s.delayed - a.s.delayed || b.s.open - a.s.open;
+    });
 
     var rows = list.map(function (r) {
       return '<tr>' +
@@ -479,7 +528,11 @@
     }).join('');
 
     return head('担当者一覧', '誰にどれだけ溜まっているかを件数で見ます', '') +
-      '<div class="toolbar"><span class="spacer"></span><span class="count">担当者 ' + S.users.length + ' 人</span></div>' +
+      '<div class="toolbar"><span class="label">並び順</span>' +
+        '<select class="inline" id="pp-sort">' +
+          optionList([['delayed', '遅延が多い順'], ['open', '未完了が多い順'], ['name', '名前順']], S.peopleSort || 'delayed') +
+        '</select>' +
+        '<span class="spacer"></span><span class="count">担当者 ' + S.users.length + ' 人</span></div>' +
       '<section class="card"><div class="tbl-wrap">' +
         '<table class="tbl"><colgroup><col><col style="width:110px"><col style="width:100px">' +
         '<col class="col-hide" style="width:118px"><col class="col-hide" style="width:100px"><col style="width:118px"></colgroup>' +
@@ -529,6 +582,9 @@
         '<span class="label">担当者</span>' +
         '<select class="inline" id="s-who">' + optionList([['', 'すべて'], ['@none', '未アサイン']].concat(
           S.users.map(function (u) { return [u.user_id, u.name]; })), searchState.who) + '</select>' +
+        '<span class="label">ステータス</span>' +
+        '<select class="inline" id="s-status">' + optionList([['', 'すべて']].concat(
+          H.STATUS_ORDER.map(function (k) { return [k, H.STATUS_LABEL[k]]; })), searchState.status) + '</select>' +
         '<span class="spacer"></span><span class="count">見つかったタスク ' + rows.length + ' 件</span>' +
       '</div>' +
       '<section class="card"><div class="tbl-wrap">' +
@@ -548,6 +604,49 @@
   }
 
   function wireInputs() {
+    // プロジェクト設定を開いたら、固有項目を読み込む
+    if (S.view === 'detail' && S.tab === 'settings' && $('p-custom')) {
+      var pj = project(S.projectId);
+      if (pj) loadProjectFields(pj);
+    }
+
+    // ① 一覧の絞り込み・並び順
+    [['f-health', 'health'], ['f-owner', 'owner'], ['f-tpl', 'tpl'], ['f-sort', 'sort']].forEach(function (p) {
+      var el = $(p[0]);
+      if (el) el.addEventListener('change', function () { S.pf[p[1]] = this.value; render(); });
+    });
+    var fd = $('f-done');
+    if (fd) fd.addEventListener('change', function () { S.pf.done = this.checked; render(); });
+
+    // ③ 概要の絞り込みと折りたたみ
+    var dd = $('d-delayed');
+    if (dd) dd.addEventListener('change', function () { S.df.delayedOnly = this.checked; render(); });
+    var dt = $('d-toggle');
+    if (dt) dt.addEventListener('click', function () {
+      var p = project(S.projectId);
+      var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
+      var anyOpen = tree.children.some(function (t) { return !S.collapsed[t.node.item_id]; });
+      tree.children.forEach(function (t) { S.collapsed[t.node.item_id] = anyOpen; });
+      render();
+    });
+
+    // ⑪ 担当者一覧の並び順
+    var pp = $('pp-sort');
+    if (pp) pp.addEventListener('change', function () { S.peopleSort = this.value; render(); });
+
+    // ⑭ マイタスクの行内変更（F-4-4）
+    document.querySelectorAll('[data-status]').forEach(function (el) {
+      el.addEventListener('change', function () { quickSave(this.getAttribute('data-status'), { status: this.value }); });
+    });
+    document.querySelectorAll('[data-rate]').forEach(function (el) {
+      el.addEventListener('change', function () {
+        quickSave(this.getAttribute('data-rate'), { progress_rate: Number(this.value || 0) });
+      });
+    });
+
+    var ss = $('s-status');
+    if (ss) ss.addEventListener('change', function () { searchState.status = this.value; render(); });
+
     var t = $('s-text');
     if (t) {
       t.addEventListener('input', function () { searchState.text = this.value; var p = this.selectionStart; render(); var n = $('s-text'); if (n) { n.focus(); n.setSelectionRange(p, p); } });
@@ -558,6 +657,37 @@
     });
   }
 
+  /**
+   * 一覧の行から、ステータスや進捗率だけを変えて保存する（F-4-4）。
+   * 画面遷移なし。担当者が現場のスマホから触る前提。
+   */
+  function quickSave(itemId, patch) {
+    var it = itemById(itemId);
+    if (!it) return;
+    var payload = {
+      item_id: it.item_id, updated_at: it.updated_at,
+      name: it.name, description: it.description || '',
+      item_type: it.item_type, assignee_user_id: it.assignee_user_id,
+      status: patch.status !== undefined ? patch.status : it.status,
+      start_date: it.start_date, end_date: it.end_date,
+      progress_rate: patch.progress_rate !== undefined ? patch.progress_rate : it.progress_rate
+    };
+    google.script.run
+      .withSuccessHandler(function (r) {
+        // 画面の見た目を合わせる（全件の読み直しはしない）
+        it.status = payload.status;
+        it.progress_rate = payload.status === 'done' ? 100 : payload.progress_rate;
+        it.updated_at = r.updated_at;
+        toast('保存しました');
+        render();
+        google.script.run.withSuccessHandler(function (d) {
+          d.summary.forEach(function (x) { S.summary[x.project_id] = x; });
+        }).getBootstrap();
+      })
+      .withFailureHandler(function (err) { fail(err); render(); })
+      .saveItem(payload);
+  }
+
   // ---- ⑨ プロジェクト作成 ----
   function viewNew() {
     return head('プロジェクトを作成', 'テンプレートを選ぶと、配下のタスクが自動で作られます', '') +
@@ -566,7 +696,11 @@
         '<div class="row2">' +
           '<div class="field"><label for="n-tpl">テンプレート</label><select id="n-tpl">' +
             optionList([['', 'テンプレートを使わない']].concat(
-              S.templates.map(function (t) { return [t.template_id, t.name]; })), '') + '</select></div>' +
+              S.templates.map(function (t) { return [t.template_id, t.name]; })), '') +
+            '</select><div class="help" id="n-tpl-help">使わない場合、タスクは作られません。作成後に足します</div></div>' +
+          '<div class="field"><label for="n-key">キー</label>' +
+            '<input id="n-key" type="text" maxlength="10" placeholder="例：CORP" style="text-transform:uppercase">' +
+            '<div class="help">タスクのキーの頭になります（CORP-1）。英大文字で始まる2〜10文字。他と重ならない値にしてください</div></div>' +
           '<div class="field"><label for="n-start">開始日</label><input id="n-start" type="date" value="' + esc(S.today) + '"></div>' +
         '</div>' +
         '<div class="row2">' +
@@ -601,11 +735,20 @@
     if (!box) return;
     var start = $('n-start') ? $('n-start').value : '';
 
+    // テンプレートを使わないとき。何も出さないと「選び忘れたのか、これでよいのか」が分からない
     if (!tplItems.length) {
-      box.hidden = true;
-      box.innerHTML = '';
       if (endEl) { endEl.disabled = false; }
       if (help) help.textContent = 'テンプレートを使わないので、終了日を入れてください';
+      box.hidden = false;
+      box.innerHTML =
+        '<div class="card-head"><h2>作られるタスク</h2><span class="faint">0 件</span></div>' +
+        '<div class="card-body">' +
+          '<p style="margin:0 0 10px">テンプレートを使わないので、<strong>タスクは作られません。</strong>' +
+          '空のプロジェクトができます。</p>' +
+          '<p style="margin:0;color:var(--text-muted);font-size:14px">' +
+          '作成したあと、プロジェクトの画面から「＋ タスクを追加」で1件ずつ足してください。' +
+          '親タスクを作ってから、その下に子タスクを足せます。</p>' +
+        '</div>';
       return;
     }
     if (!start) { box.hidden = true; return; }
@@ -701,7 +844,11 @@
   // ---- プロジェクト設定 ----
   function projectSettings(p) {
     return '<section class="card"><div class="card-body" style="max-width:620px">' +
-      '<div class="field"><label for="p-name">名称</label><input id="p-name" type="text" value="' + esc(p.name) + '"></div>' +
+      '<div class="row2">' +
+        '<div class="field"><label for="p-name">名称</label><input id="p-name" type="text" value="' + esc(p.name) + '"></div>' +
+        '<div class="field"><label for="p-key">キー</label><input id="p-key" type="text" maxlength="10" value="' + esc(p.key) + '" style="text-transform:uppercase">' +
+          '<div class="help">タスクのキーの頭です。変えても、すでに作ったタスクのキーは変わりません</div></div>' +
+      '</div>' +
       '<div class="field"><label for="p-desc">説明</label><textarea id="p-desc">' + esc(p.description || '') + '</textarea></div>' +
       '<div class="row2">' +
         '<div class="field"><label for="p-start">開始日</label><input id="p-start" type="date" value="' + esc(p.start_date) + '"></div>' +
@@ -713,6 +860,7 @@
         '<div class="field"><label for="p-status">ステータス</label><select id="p-status">' +
           optionList(H.STATUS_ORDER.map(function (s) { return [s, H.STATUS_LABEL[s]]; }), p.status) + '</select></div>' +
       '</div>' +
+      '<div id="p-custom"></div>' +
       '<button class="btn primary" id="p-save">保存</button>' +
     '</div></section>';
   }
@@ -727,6 +875,8 @@
         p.name = $('p-name').value; p.description = $('p-desc').value;
         p.start_date = $('p-start').value; p.end_date = $('p-end').value;
         p.owner_user_id = $('p-owner').value; p.status = $('p-status').value;
+        p.key = $('p-key').value.toUpperCase();
+        p.custom_fields = collectCustomFields(p);
         p.updated_at = r.updated_at;
         btn.disabled = false;
         toast('保存しました');
@@ -738,12 +888,71 @@
         name: $('p-name').value, description: $('p-desc').value,
         start_date: $('p-start').value, end_date: $('p-end').value,
         owner_user_id: $('p-owner').value, status: $('p-status').value,
-        custom_fields: p.custom_fields || {}
+        key: $('p-key').value.toUpperCase(),
+        custom_fields: collectCustomFields(p)
       });
   });
 
+  /**
+   * プロジェクト設定の「固有項目」を描く（F-3-13）。
+   * 欄はテンプレートの定義から作る。テンプレートを使っていないプロジェクトは項目そのものが無い。
+   */
+  var pjFields = [];
+  function loadProjectFields(p) {
+    pjFields = [];
+    var box = $('p-custom');
+    if (!box) return;
+    if (!p.template_id) {
+      box.innerHTML = '<h3 style="margin:20px 0 10px">固有の設定項目</h3>' +
+        '<p class="help" style="margin:0">このプロジェクトはテンプレートを使っていないため、固有の設定項目はありません。' +
+        '項目が要る場合は、テンプレートに定義してから作り直してください。</p>';
+      return;
+    }
+    box.innerHTML = '<div class="help">固有の設定項目を読み込んでいます…</div>';
+    google.script.run.withSuccessHandler(function (d) {
+      pjFields = d.fields || [];
+      var cf = p.custom_fields || {};
+      box.innerHTML = pjFields.length
+        ? '<h3 style="margin:20px 0 10px">固有の設定項目</h3>' +
+          '<p class="help" style="margin:-4px 0 12px">「' + esc(p.template_name) + '」テンプレートの定義から作られています</p>' +
+          pjFields.map(function (f) {
+            var id = 'pcf-' + f.field_key, v = cf[f.field_key], input;
+            if (f.type === 'select') {
+              input = '<select id="' + id + '"><option value=""></option>' +
+                (f.options || []).map(function (o) {
+                  return '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>';
+                }).join('') + '</select>';
+            } else if (f.type === 'checkbox') {
+              input = '<label class="help"><input type="checkbox" id="' + id + '"' + (v ? ' checked' : '') + '> はい</label>';
+            } else {
+              var t = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
+              input = '<input id="' + id + '" type="' + t + '" value="' +
+                esc(v === undefined || v === null ? '' : v) + '">';
+            }
+            return '<div class="field"><label for="' + id + '">' + esc(f.label) +
+              (f.required ? ' <span class="late">必須</span>' : '') + '</label>' + input + '</div>';
+          }).join('')
+        : '<h3 style="margin:20px 0 10px">固有の設定項目</h3>' +
+          '<p class="help" style="margin:0">このテンプレートには設定項目が定義されていません</p>';
+    }).withFailureHandler(function () {
+      box.innerHTML = '<p class="help">固有の設定項目を読み込めませんでした</p>';
+    }).getTemplateDetail(p.template_id);
+  }
+
+  /** 画面の入力値を custom_fields の形にする */
+  function collectCustomFields(p) {
+    if (!pjFields.length) return p.custom_fields || {};
+    var out = {};
+    pjFields.forEach(function (f) {
+      var el = $('pcf-' + f.field_key);
+      if (!el) return;
+      out[f.field_key] = f.type === 'checkbox' ? el.checked : (f.type === 'number' ? Number(el.value) : el.value);
+    });
+    return out;
+  }
+
   // ---- ⑦ タスクの編集（小窓） ----
-  function openTaskEditor(itemId, projectIdForNew) {
+  function openTaskEditor(itemId, projectIdForNew, parentIdForNew) {
     var item = itemId ? itemById(itemId) : null;
     var isNew = !item;
     var pid = isNew ? projectIdForNew : item.project_id;
@@ -752,17 +961,21 @@
     var hasKids = kids.length > 0;
 
     if (isNew) {
+      var pt = parentIdForNew ? itemById(parentIdForNew) : null;
       item = {
-        item_id: '', project_id: pid, parent_item_id: '', name: '', description: '',
+        item_id: '', project_id: pid, parent_item_id: parentIdForNew || '', name: '', description: '',
         item_type: 'work', assignee_user_id: '', status: 'not_started',
-        start_date: p ? p.start_date : S.today, end_date: p ? p.end_date : S.today, progress_rate: 0
+        // 子タスクなら親と同じ期間、タスクならプロジェクトと同じ期間を初期値にする
+        start_date: pt ? pt.start_date : (p ? p.start_date : S.today),
+        end_date: pt ? pt.end_date : (p ? p.end_date : S.today),
+        progress_rate: 0
       };
     }
 
     var parents = itemsOf(pid).filter(function (x) { return Number(x.level) === 1 && x.item_id !== item.item_id; });
 
     $('modal').innerHTML =
-      '<div class="m-head"><h2 id="modal-title">' + (isNew ? 'タスクを追加' : 'タスクの編集') + '</h2>' +
+      '<div class="m-head"><h2 id="modal-title">' + (isNew ? (parentIdForNew ? '子タスクを追加' : 'タスクを追加') : 'タスクの編集') + '</h2>' +
         '<span class="spacer"></span><span class="faint">' + esc(item.item_key || '(キーは自動)') + '</span></div>' +
       '<div class="m-body">' +
         '<div class="field"><label for="t-name">タスク名</label><input id="t-name" type="text" value="' + esc(item.name) + '"></div>' +
@@ -776,7 +989,7 @@
         (isNew
           ? '<div class="field"><label for="t-parent">親タスク</label><select id="t-parent">' +
             optionList([['', 'なし（タスクとして作る）']].concat(
-              parents.map(function (x) { return [x.item_id, x.name]; })), '') +
+              parents.map(function (x) { return [x.item_id, x.name]; })), parentIdForNew || '') +
             '</select><div class="help">選ぶと、その下の子タスクになります</div></div>'
           : '') +
         '<div class="row2">' +
@@ -811,6 +1024,13 @@
     $('backdrop').onclick = closeModal;
     if ($('t-del')) $('t-del').onclick = function () { removeTask(item, kids.length); };
     $('t-save').onclick = function () { saveTask(item, isNew, hasKids); };
+  }
+
+  /** 親タスクを決めた状態で「子タスクを追加」を開く */
+  function openSubTaskEditor(parentItemId) {
+    var parent = itemById(parentItemId);
+    if (!parent) { toast('親タスクが見つかりません', true); return; }
+    openTaskEditor(null, parent.project_id, parentItemId);
   }
 
   function closeModal() {

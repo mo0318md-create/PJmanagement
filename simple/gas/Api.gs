@@ -238,6 +238,16 @@ function saveProject(patch) {
       throw new Error('ほかの人が先に更新しています。画面を再読み込みしてください');
     }
     if (!String(patch.name || '').trim()) throw new Error('名称は必須です');
+    if (patch.key !== undefined) {
+      var k = String(patch.key || '').trim().toUpperCase();
+      if (!/^[A-Z][A-Z0-9]{1,9}$/.test(k)) {
+        throw new Error('キーは英大文字で始まる2〜10文字の英数字にしてください（例：CORP）');
+      }
+      if (readAll_('projects').some(function (p) {
+        return p.project_id !== cur.project_id && String(p.key).toUpperCase() === k;
+      })) throw new Error('キー「' + k + '」はすでに別のプロジェクトで使われています');
+      patch.key = k;
+    }
     if (patch.start_date && patch.end_date && patch.start_date > patch.end_date) {
       throw new Error('開始日が終了日より後になっています');
     }
@@ -300,10 +310,21 @@ function createProject(data) {
       if (endDate < data.start_date) throw new Error('開始日が終了日より後になっています');
     }
 
+    // キーはタスクのキー（CORP-1）の頭になる。**プロジェクトごとに違う値**でないと、
+    // 別のプロジェクトのタスクと同じキーができてしまう。
+    var key = String(data.key || (tpl ? tpl.key_prefix : '')).trim().toUpperCase();
+    if (!key) throw new Error('キーは必須です（タスクのキーの頭になります。例：CORP）');
+    if (!/^[A-Z][A-Z0-9]{1,9}$/.test(key)) {
+      throw new Error('キーは英大文字で始まる2〜10文字の英数字にしてください（例：CORP、A200）');
+    }
+    if (readAll_('projects').some(function (p) { return String(p.key).toUpperCase() === key; })) {
+      throw new Error('キー「' + key + '」はすでに使われています。別のキーにしてください');
+    }
+
     var pid = uuid_();
     var project = {
       project_id: pid,
-      key: data.key || (tpl ? tpl.key_prefix : 'PJ'),
+      key: key,
       name: data.name,
       description: data.description || '',
       template_id: tpl ? tpl.template_id : '',

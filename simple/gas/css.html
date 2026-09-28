@@ -173,6 +173,10 @@ table.tbl td.r, table.tbl th.r { text-align: right; }
 .tree-row .name .link:hover { color: var(--accent); }
 .toggle { border: none; background: none; cursor: pointer; color: var(--text-muted); width: 20px; flex-shrink: 0; font-size: 11px; padding: 0; }
 
+/* 子タスクを足す小さなリンク */
+.add-sub { font-size: 13px; color: var(--accent); white-space: nowrap; cursor: pointer; flex-shrink: 0; }
+.tree-row:not(:hover) .add-sub { opacity: .4; }
+
 .empty { padding: 36px 16px; text-align: center; color: var(--text-faint); }
 
 /* ---- 小窓 ---- */
