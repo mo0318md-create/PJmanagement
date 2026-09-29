@@ -64,6 +64,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .sidebar a:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
 .sidebar a.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .sidebar a .ico { width: 16px; text-align: center; flex-shrink: 0; }
+.sidebar a .short { display: none; }
 
 .main { flex: 1; min-width: 0; padding: 26px 28px 56px; display: flex; flex-direction: column; gap: 20px; }
 .loading { padding: 60px 0; text-align: center; color: var(--text-faint); }
@@ -216,7 +217,7 @@ textarea { resize: vertical; min-height: 72px; }
 /* ---- 日付軸 ---- */
 .gantt .g-head { background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text-muted); align-items: end; }
 .gantt .g-headlabel {
-  position: sticky; left: 0; z-index: 4; align-self: stretch; display: flex; align-items: flex-end;
+  position: sticky; left: 0; z-index: 6; align-self: stretch; display: flex; align-items: flex-end;
   font-size: 15px; font-weight: 700; padding: 0 16px 7px 14px; background: var(--surface-2); border-right: 1px solid var(--border);
 }
 .gantt .g-axis { position: relative; margin: 0 14px 0 12px; }
@@ -322,10 +323,47 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .toast.err { background: var(--h-delayed); }
 
+
+/* ---------------- 保存中（保存が終わるまで「終わった」と見せない） ---------------- */
+.saving-ind {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px; white-space: nowrap;
+  font-size: 13px; font-weight: 700; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d;
+}
+.saving-ind i {
+  width: 12px; height: 12px; border-radius: 50%; border: 2px solid #f59e0b; border-right-color: transparent;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.saving-pill {
+  display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+  font-size: 11px; font-weight: 700; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; vertical-align: middle;
+}
+.is-saving { background-image: repeating-linear-gradient(-45deg, transparent 0 7px, rgba(245, 158, 11, .10) 7px 14px); }
+.gantt .g-bar.is-saving, .gantt .g-span.is-saving {
+  opacity: .55; background-image: repeating-linear-gradient(-45deg, rgba(255, 255, 255, .55) 0 5px, transparent 5px 10px);
+  outline: 2px dashed #f59e0b; outline-offset: 1px;
+}
+.tcard.is-saving { border-style: dashed; border-color: #f59e0b; }
+
+/* ---------------- 登録・最終更新 ---------------- */
+.stamp {
+  display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 16px; padding: 9px 12px; border-radius: 9px;
+  background: var(--surface-2); font-size: 13px; color: var(--text-muted);
+}
+.stamp b { font-weight: 700; color: var(--text); margin-right: 4px; }
+.cell .s.upd { display: block; font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.page-head .sub .upd { font-size: 12px; color: var(--text-faint); margin-top: 3px; }
+@media (max-width: 640px) {
+  .saving-ind { padding: 3px 9px; font-size: 12px; }
+}
+
 /* ---------------- ドラッグ（マウス・タッチ共通） ---------------- */
 [hidden] { display: none !important; }
 body.is-dragging, body.is-dragging * { -webkit-user-select: none; user-select: none; cursor: grabbing !important; }
 .g-grab, .tcard { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* 横スクロールの端で、ページの「戻る／進む」の操作に化けないようにする */
+.gantt-scroll, .board-wrap, .tabs, .tbl-wrap { overscroll-behavior-x: contain; }
+html, body { overscroll-behavior-x: none; }
 .gantt .g-bar.g-grab { cursor: grab; }
 .gantt .g-bar .g-h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 2; }
 .gantt .g-bar .g-h.l { left: 0; }
@@ -425,8 +463,15 @@ body.is-dragging, body.is-dragging * { -webkit-user-select: none; user-select: n
   .gantt .g-row.g-group .g-name .txt { white-space: normal; overflow: visible; }
   .board { grid-template-columns: repeat(4, 220px); }
   .board-wrap { overflow-x: auto; }
-  .ti-row, .ff-row { grid-template-columns: minmax(0, 1fr) 34px; row-gap: 4px; }
-  .ti-row > :nth-child(n+3):not(:last-child), .ff-row > :nth-child(n+2):not(:last-child) { display: none; }
+  /* テンプレートのタスク行：種別｜名前（折り返す）｜ボタン。開始・期間は編集の小窓で見る */
+  .ti-row { grid-template-columns: 22px minmax(0, 1fr) auto; row-gap: 4px; padding-left: 12px; padding-right: 12px; }
+  .ti-row.lv2 { padding-left: 26px; }
+  .ti-row > :nth-child(3), .ti-row > :nth-child(4) { display: none; }
+  .ti-row > :nth-child(2) { white-space: normal !important; overflow: visible !important; }
+  /* 設定項目の行：名前｜編集｜削除（型・必須は編集の小窓で見る） */
+  .ff-row { grid-template-columns: minmax(0, 1fr) auto auto; padding-left: 12px; padding-right: 12px; }
+  .ff-row > :nth-child(2), .ff-row > :nth-child(3) { display: none; }
+  .ff-row > :first-child { white-space: normal !important; }
   .fe-row { grid-template-columns: minmax(0, 1fr) 112px 34px; row-gap: 6px; }
   .fe-row.fe-colhead { display: none; }
   .fe-row .fe-val { grid-column: 1 / -1; order: 4; }
@@ -442,5 +487,88 @@ body.is-dragging, body.is-dragging * { -webkit-user-select: none; user-select: n
   /* お知らせ（トースト）は下部タブバーの上に出す */
   .toast { left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); max-width: none; }
 }
-.sidebar a .short { display: none; }
+
+/* テンプレート編集：左に一覧、右に中身 */
+.tpl-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
+.gantt .g-mdates { display: none; }
+.m-only { display: none; }
+
+/* ================================================================
+ * スマホ・タブレット縦（900px 以下）
+ * ================================================================ */
+@media (max-width: 900px) {
+  /* 下部タブバー：アイコンと短い名前を縦に並べる */
+  .sidebar a .ico { width: auto; font-size: 20px; line-height: 1; }
+  .sidebar a .short { display: block; font-size: 11px; line-height: 1.2; }
+
+  /* ガント：名前の欄を細くして、時間軸を広く見せる */
+  /* 行の幅＝名前の欄＋時間軸。これより狭いと、名前の欄が横スクロールで一緒に流れてしまう（sticky は行の中でしか効かない） */
+  .gantt { min-width: 696px; }
+  .gantt .g-row, .gantt .g-head { grid-template-columns: 136px minmax(560px, 1fr); }
+  .gantt .g-label { padding: 7px 8px 7px 10px; font-size: 13px; gap: 2px; }
+  .gantt .g-headlabel { padding: 0 8px 7px 10px; font-size: 12px; }
+  .gantt .g-row.lv2 .g-label { padding-left: 18px; }
+  .gantt .g-row:not(.g-group):not(.g-sub) .g-dates { display: none; }
+  .gantt .g-mdates { display: block; font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+  .gantt .g-label .chip, .gantt .g-label .g-key, .gantt .g-row:not(.g-group) .g-label .badge { display: none; }
+  .gantt .g-name { flex-wrap: nowrap; }
+  .gantt .g-name .link, .gantt .g-name .txt {
+    white-space: normal !important; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35;
+  }
+  .gantt .g-row.g-group .g-name { font-size: 13px; flex-wrap: wrap; }
+  .gantt .g-row.g-group .g-dates, .gantt .g-row.g-sub .g-dates { font-size: 12px; }
+  .gantt .g-row.g-sub .g-label { padding-left: 14px; }
+  .gantt-legend { font-size: 12px; gap: 6px 12px; }
+  .gantt-legend .lg-extra { display: none; }
+
+  /* ボード：1列ずつ横にめくる */
+  .board { grid-template-columns: repeat(4, 78vw); }
+  .board-wrap { scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
+  .board-col { scroll-snap-align: start; }
+  body.is-dragging .board-wrap { scroll-snap-type: none; }
+
+  /* テンプレート編集：一覧を上、中身を下に */
+  .tpl-layout { grid-template-columns: minmax(0, 1fr); }
+  .m-only { display: inline-flex; }
+  /* 表：1行を1枚のカードに組み替える。先頭の列（名前）を1段目に全幅で出し、残りは見出し付きで並べる */
+  table.tbl, table.tbl tbody { display: block; width: 100%; }
+  table.tbl colgroup, table.tbl thead { display: none; }
+  table.tbl tr { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 14px; }
+  table.tbl td { display: flex; align-items: center; gap: 6px; padding: 0; border: none; overflow: visible; min-width: 0; }
+  table.tbl td:first-child { flex: 1 1 100%; display: block; }
+  table.tbl td.col-hide { display: none; }
+  table.tbl td[data-label]::before { content: attr(data-label); font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+  table.tbl td[colspan] { flex: 1 1 100%; }
+  table.tbl td .prog-wrap { min-width: 130px; }
+  table.tbl td select, table.tbl td input { width: auto; }
+
+}
+
+/* ================================================================
+ * スマホ（640px 以下）
+ * ================================================================ */
+@media (max-width: 640px) {
+  .main { gap: 14px; padding-left: 12px; padding-right: 12px; }
+
+  /* 見出し：題名を1行目、ボタンを2行目に */
+  .page-head { flex-wrap: wrap; gap: 10px; }
+  .page-head > div:first-child { flex: 1 1 100%; }
+  .page-head h1 { font-size: 21px; }
+  .page-head .sub { font-size: 13px; }
+
+  /* 概要のツリー：名前を折り返して全部見せる。状態は右に */
+  .tree-row { grid-template-columns: minmax(0, 1fr) auto; padding: 11px 12px; gap: 10px; }
+  .tree-row .name { flex-wrap: wrap; row-gap: 4px; }
+  .tree-row .name .link { flex: 1 1 8em; white-space: normal; overflow: visible; line-height: 1.4; }
+  .tree-row.lv2 .name { padding-left: 18px; }
+  .tree-row .add-sub { font-size: 12px; }
+
+  /* 小窓（下から出る）：見出しと保存ボタンを常に見えるところに置く */
+  .modal .m-head { position: sticky; top: 0; z-index: 1; background: var(--surface); padding: 14px 16px; }
+  .modal .m-body { padding: 16px; }
+  .modal .m-foot { position: sticky; bottom: 0; background: var(--surface); padding: 12px 16px; flex-wrap: wrap; }
+
+  .card-head { padding: 12px 14px; flex-wrap: wrap; }
+  .card-body { padding: 14px; }
+}
 </style>

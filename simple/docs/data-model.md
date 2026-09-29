@@ -71,7 +71,9 @@ settings       （key-value。1行1設定）
 | active | bool | ○ | TRUE | FALSE なら作成画面の選択肢に出さない |
 | sort_order | int | ○ | | 100刻み |
 | created_at | ts | ○ | | |
-| updated_at | ts | ○ | | |
+| updated_at | ts | ○ | | タスク構成・設定項目を変えたときも進める |
+| created_by / created_by_name | str | | | 登録者（`projects` の「登録者・更新者の列」と同じ） |
+| updated_by / updated_by_name | str | | | 最終更新者 |
 
 ---
 
@@ -127,7 +129,14 @@ settings       （key-value。1行1設定）
 | field_defs | json | | （空欄） | 設定項目の定義。`[{key,label,type,options,required,source}]`。type は `text`/`number`/`date`/`select`/`checkbox`。source は `template`（作成時にテンプレートからコピー。名前・型・必須は変えられない）/ `project`（そのプロジェクトで足した項目）。**作成時にコピーするので、テンプレートを後で変えても遡及しない**。空欄の古い行は、テンプレートの定義と値のキー（文字型）から組み立てて扱い、次に保存したときに埋まる |
 | next_item_seq | int | ○ | 1 | タスクキーの次の連番 |
 | created_at | ts | ○ | | |
-| updated_at | ts | ○ | | 衝突検知に使う（§5.1） |
+| updated_at | ts | ○ | | 衝突検知に使う（§5.1）。プロジェクトの設定を変えたときだけ進める（タスクの追加では進めない） |
+| created_by / created_by_name | str | | | 登録者の社員コードと、その時点の氏名（下の「登録者・更新者の列」を参照） |
+| updated_by / updated_by_name | str | | | 最終更新者の社員コードと、その時点の氏名 |
+
+> **登録者・更新者の列**（`projects`・`items`・`templates` に共通）：
+> 人は社員コード（共通マスタ）で指すが、退職などで一覧から消えても記録の名前が残るよう、氏名も一緒に書く。
+> 列を足す前からある行は空欄のまま（画面では「記録なし」）。次に保存したときに埋まる。
+> 列の見出しは、アプリが最初に読み書きしたときに自動で右端へ足す（setup() のやり直しは要らない）。
 
 > 完全版から削除：`plan_status` / `plan_fixed_at` / `plan_fixed_by` / `baseline_version` /
 > `baseline_start_date` / `baseline_end_date` / `baseline_set_at`（当初計画）、
@@ -155,6 +164,8 @@ settings       （key-value。1行1設定）
 | progress_rate | int | | 0 | 0〜100。**子を持たないタスクだけ**が持つ。子を持つ行は空（要件 §3.2） |
 | created_at | ts | ○ | | |
 | updated_at | ts | ○ | | 衝突検知に使う |
+| created_by / created_by_name | str | | | 登録者（`projects` の「登録者・更新者の列」と同じ） |
+| updated_by / updated_by_name | str | | | 最終更新者 |
 
 > 完全版から削除：`baseline_start_date` / `baseline_end_date` / `baseline_set_at`（当初計画）、
 > `size_key` / `estimate_hours`（作業の重さ）、`milestone_id`、`label_ids`、`completed_at`、

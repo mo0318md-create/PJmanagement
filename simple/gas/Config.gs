@@ -15,11 +15,14 @@
  * 「null の getSheetByName は読めません」という分かりにくいエラーになる。
  * ここで、何をすればよいかまで言って止める。
  */
+var SS_MEMO_ = null;   // 1回の実行で何度も開かない（開くのが一番遅い）
 function SS_() {
+  if (SS_MEMO_) return SS_MEMO_;
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (id) {
     try {
-      return SpreadsheetApp.openById(id);
+      SS_MEMO_ = SpreadsheetApp.openById(id);
+      return SS_MEMO_;
     } catch (e) {
       throw new Error('スクリプトプロパティ SPREADSHEET_ID（' + id + '）のスプレッドシートを開けません。' +
         'IDが正しいか、このアカウントに閲覧権限があるかを確認してください。元のエラー: ' +
@@ -28,7 +31,7 @@ function SS_() {
   }
 
   var active = SpreadsheetApp.getActive();
-  if (active) return active;
+  if (active) { SS_MEMO_ = active; return active; }
 
   throw new Error(
     'データを置くスプレッドシートが決まっていません。次のどちらかをしてください。\n' +
@@ -45,7 +48,7 @@ var SHEETS = {
   },
   templates: {
     key: 'template_id',
-    cols: ['template_id', 'name', 'description', 'key_prefix', 'active', 'sort_order', 'created_at', 'updated_at']
+    cols: ['template_id', 'name', 'description', 'key_prefix', 'active', 'sort_order', 'created_at', 'updated_at', 'created_by', 'created_by_name', 'updated_by', 'updated_by_name']
   },
   template_items: {
     key: 'template_item_id',
@@ -59,13 +62,13 @@ var SHEETS = {
   projects: {
     key: 'project_id',
     cols: ['project_id', 'key', 'name', 'description', 'template_id', 'template_name', 'owner_user_id',
-           'status', 'start_date', 'end_date', 'custom_fields', 'field_defs', 'next_item_seq', 'created_at', 'updated_at']
+           'status', 'start_date', 'end_date', 'custom_fields', 'field_defs', 'next_item_seq', 'created_at', 'updated_at', 'created_by', 'created_by_name', 'updated_by', 'updated_by_name']
   },
   items: {
     key: 'item_id',
     cols: ['item_id', 'project_id', 'item_key', 'level', 'parent_item_id', 'sort_order',
            'name', 'description', 'item_type', 'assignee_user_id', 'status',
-           'start_date', 'end_date', 'progress_rate', 'created_at', 'updated_at']
+           'start_date', 'end_date', 'progress_rate', 'created_at', 'updated_at', 'created_by', 'created_by_name', 'updated_by', 'updated_by_name']
   },
   settings: {
     key: 'key',

@@ -9,9 +9,18 @@
  */
 
 /** シートを取る。無ければ作ってヘッダーを入れる */
-var COLS_CHECKED_ = {};
+/*
+ * 1回の実行（画面からの1回の呼び出し）の中で使い回すもの。
+ * スプレッドシートへの呼び出しは1回ごとに時間がかかるので、同じシートを何度も開いたり読んだりしない。
+ *   SHEET_MEMO_ … シートの取得
+ *   READ_MEMO_  … readAll_ の結果。書き込んだら合わせて直す（または捨てる）
+ * 書き込みの排他（withLock_）に入ったときは READ_MEMO_ を捨て、ロックの中では必ず最新を読む。
+ */
+var SHEET_MEMO_ = {};
+var READ_MEMO_ = {};
 
 function sheet_(name) {
+  if (SHEET_MEMO_[name]) return SHEET_MEMO_[name];
   var ss = SS_();
   var sh = ss.getSheetByName(name);
   if (!sh) {
@@ -19,16 +28,21 @@ function sheet_(name) {
     var cols = SHEETS[name].cols;
     sh.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');
     sh.setFrozenRows(1);
-  } else if (!COLS_CHECKED_[name] && SHEETS[name]) {
-    // 列を足したとき、既存のシートにも見出しを足す。見出しが無い列は書き込みが黙って捨てられるため
-    var head = header_(sh);
-    var missing = SHEETS[name].cols.filter(function (c) { return head.indexOf(c) < 0; });
-    if (head.length && missing.length) {
-      sh.getRange(1, head.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
-    }
   }
-  COLS_CHECKED_[name] = true;
+  SHEET_MEMO_[name] = sh;
   return sh;
+}
+
+/**
+ * 定義にあってシートに無い列の見出しを、右端に足す（列を増やしたときに setup() をやり直さなくてよいように）。
+ * 見出しが無い列は書き込みが黙って捨てられるため。すでに読んだ見出しを渡すので、余計な読み出しはしない。
+ */
+function ensureCols_(name, sh, head) {
+  if (!SHEETS[name] || !head.length) return head;
+  var missing = SHEETS[name].cols.filter(function (c) { return head.indexOf(c) < 0; });
+  if (!missing.length) return head;
+  sh.getRange(1, head.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+  return head.concat(missing);
 }
 
 /** ヘッダー行（列名の配列） */
@@ -73,12 +87,14 @@ function encodeCell_(col, v) {
   return v;
 }
 
-/** シートを全部読んでオブジェクトの配列にする */
+/** シートを全部読んでオブジェクトの配列にする（同じ実行の中では2回目から読み直さない） */
 function readAll_(name) {
+  if (READ_MEMO_[name]) return READ_MEMO_[name].slice();
   var sh = sheet_(name);
   var values = sh.getDataRange().getValues();
-  if (values.length < 2) return [];
-  var head = values[0].map(function (v) { return String(v).trim(); });
+  var head = (values[0] || []).map(function (v) { return String(v).trim(); });
+  ensureCols_(name, sh, head);
+  if (values.length < 2) { READ_MEMO_[name] = []; return []; }
   var out = [];
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
@@ -91,7 +107,8 @@ function readAll_(name) {
     o.__row = r + 1;                                  // シート上の行番号（更新に使う）
     out.push(o);
   }
-  return out;
+  READ_MEMO_[name] = out;
+  return out.slice();
 }
 
 /** 主キーで1件引く */
@@ -105,7 +122,8 @@ function findById_(name, id) {
 /** 1行を足す。obj は列名をキーにしたオブジェクト */
 function insertRow_(name, obj) {
   var sh = sheet_(name);
-  var head = header_(sh);
+  var head = ensureCols_(name, sh, header_(sh));
+  delete READ_MEMO_[name];
   var row = head.map(function (col) { return encodeCell_(col, obj[col]); });
   sh.appendRow(row);
   return obj;
@@ -117,15 +135,20 @@ function insertRow_(name, obj) {
  */
 function updateRow_(name, id, patch) {
   var sh = sheet_(name);
-  var head = header_(sh);
+  var head = ensureCols_(name, sh, header_(sh));
   var key = SHEETS[name].key;
   var keyCol = head.indexOf(key) + 1;
   if (keyCol < 1) throw new Error(name + ' に ' + key + ' 列がありません');
 
-  var ids = sh.getRange(1, keyCol, Math.max(sh.getLastRow(), 1), 1).getValues();
-  var rowIndex = -1;
-  for (var r = 1; r < ids.length; r++) {
-    if (String(ids[r][0]).trim() === String(id)) { rowIndex = r + 1; break; }
+  // この実行の中で読んだ行なら、行番号はもう分かっている（読み直さない）
+  var memoRow = null;
+  (READ_MEMO_[name] || []).some(function (o) { if (String(o[key]) === String(id)) { memoRow = o; return true; } return false; });
+  var rowIndex = memoRow ? memoRow.__row : -1;
+  if (rowIndex < 0) {
+    var ids = sh.getRange(1, keyCol, Math.max(sh.getLastRow(), 1), 1).getValues();
+    for (var r = 1; r < ids.length; r++) {
+      if (String(ids[r][0]).trim() === String(id)) { rowIndex = r + 1; break; }
+    }
   }
   if (rowIndex < 0) throw new Error(name + ' に ' + id + ' が見つかりません');
 
@@ -135,12 +158,14 @@ function updateRow_(name, id, patch) {
     if (col && patch.hasOwnProperty(col)) current[c] = encodeCell_(col, patch[col]);
   }
   sh.getRange(rowIndex, 1, 1, head.length).setValues([current]);
+  if (memoRow) Object.keys(patch).forEach(function (k) { memoRow[k] = patch[k]; });   // 読んだ内容も合わせる
   return rowIndex;
 }
 
 /** 1行を消す */
 function deleteRow_(name, id) {
   var sh = sheet_(name);
+  delete READ_MEMO_[name];                                 // 行番号がずれるので捨てる
   var head = header_(sh);
   var keyCol = head.indexOf(SHEETS[name].key) + 1;
   var ids = sh.getRange(1, keyCol, Math.max(sh.getLastRow(), 1), 1).getValues();
@@ -155,6 +180,7 @@ function deleteRowsWhere_(name, pred) {
   var sh = sheet_(name);
   var all = readAll_(name);
   var rows = all.filter(pred).map(function (o) { return o.__row; }).sort(function (a, b) { return b - a; });
+  delete READ_MEMO_[name];
   rows.forEach(function (r) { sh.deleteRow(r); });
   return rows.length;
 }
@@ -163,6 +189,7 @@ function deleteRowsWhere_(name, pred) {
 function withLock_(fn) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) throw new Error('ほかの人が書き込み中です。少し待ってからもう一度お試しください');
+  READ_MEMO_ = {};   // ロックを取る前に読んだ内容は古いかもしれない。ロックの中では読み直す
   try { return fn(); } finally { lock.releaseLock(); }
 }
 

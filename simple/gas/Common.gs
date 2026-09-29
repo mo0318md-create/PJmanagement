@@ -166,6 +166,11 @@ function commonSyncStatus_() {
  */
 function saveCommonFallback_(people) {
   try {
+    // 中身が前回と同じなら書かない（以前は画面を開くたびに書いていて、それが遅さの原因の1つだった）
+    var text0 = JSON.stringify(people);
+    var digest = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, text0, Utilities.Charset.UTF_8));
+    var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('COMMON_FALLBACK_DIGEST') === digest) return;
     var ss = SS_();
     var sh = ss.getSheetByName(COMMON_FALLBACK_SHEET_);
     if (!sh) { sh = ss.insertSheet(COMMON_FALLBACK_SHEET_); sh.hideSheet(); }
@@ -177,6 +182,7 @@ function saveCommonFallback_(people) {
     for (var i = 0; i < text.length; i += 40000) chunks.push(text.slice(i, i + 40000));
     var rows = chunks.map(function (c, idx) { return [idx === 0 ? now_() : '', c]; });
     if (rows.length) sh.getRange(2, 1, rows.length, 2).setValues(rows);
+    props.setProperty('COMMON_FALLBACK_DIGEST', digest);
   } catch (e) {
     // 控えが書けなくてもアプリは動く。次に読めたときに書き直す
   }

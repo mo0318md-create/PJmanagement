@@ -14,7 +14,37 @@
  * 実体は resolveMe_（Common.gs）。ここでは pp を省略して呼ぶだけの薄いラッパー。
  */
 function currentUser_() {
-  return resolveMe_(peopleForUi_());
+  var key = meCacheKey_();
+  if (key) {
+    try { var hit = CacheService.getScriptCache().get(key); if (hit) return JSON.parse(hit); } catch (e) {}
+  }
+  return rememberMe_(resolveMe_(peopleForUi_()));
+}
+
+function meCacheKey_() {
+  var email = '';
+  try { email = Session.getActiveUser().getEmail() || ''; } catch (e) {}
+  return email ? 'me:' + email.toLowerCase() : '';
+}
+function rememberMe_(me) {
+  var key = meCacheKey_();
+  if (key && me) { try { CacheService.getScriptCache().put(key, JSON.stringify(me), 600); } catch (e) {} }
+  return me;
+}
+
+/* ---- 誰がいつ登録・更新したか（① 最終更新日時 ② 登録者・更新者）----
+ * 人は ID（社員コード）と、その時点の氏名の両方を持つ。退職などで一覧から消えても、記録の名前は残る。 */
+function stampNew_(o, me) {
+  var t = now_();
+  o.created_at = t; o.updated_at = t;
+  o.created_by = me ? me.user_id : ''; o.created_by_name = me ? me.name : '';
+  o.updated_by = o.created_by; o.updated_by_name = o.created_by_name;
+  return o;
+}
+function stampEdit_(o, me) {
+  o.updated_at = now_();
+  o.updated_by = me ? me.user_id : ''; o.updated_by_name = me ? me.name : '';
+  return o;
 }
 
 /**
@@ -50,7 +80,7 @@ function getBootstrap() {
   // 人は共通マスタから読む（Common.gs）。読めなければ控え、それも無ければ users シート
   var pp = peopleForUi_();
   // ログイン中の人も、担当者一覧と同じID空間で解決する（pp を渡して二重取得を避ける）
-  var me = resolveMe_(pp);
+  var me = rememberMe_(resolveMe_(pp));
   var note = pp.note;
   var peopleOut = pp.people.slice();
   if (me && me.notInPeopleList) {
@@ -131,6 +161,7 @@ function strip_(o) {
  *   updated_at は読み込んだときの値。ほかの人が先に更新していたら弾く。
  */
 function saveItem(patch) {
+  var me = currentUser_();
   return withLock_(function () {
     var cur = findById_('items', patch.item_id);
     if (!cur) throw new Error('タスクが見つかりません');
@@ -147,9 +178,9 @@ function saveItem(patch) {
       assignee_user_id: patch.assignee_user_id || '',
       status: patch.status,
       start_date: patch.start_date || '',
-      end_date: patch.end_date || '',
-      updated_at: now_()
+      end_date: patch.end_date || ''
     };
+    stampEdit_(next, me);
 
     // 子タスクを持つ行は進捗率を持たない（子の平均になるため）
     var hasKids = readAll_('items').some(function (x) { return x.parent_item_id === cur.item_id; });
@@ -163,8 +194,10 @@ function saveItem(patch) {
     if (String(oldAssignee || '') !== String(next.assignee_user_id || '')) {
       notifyAssignChange_(cur, oldAssignee, next.assignee_user_id);
     }
-    refreshSummary_(cur.project_id);
-    return { ok: true, updated_at: next.updated_at };
+    // 画面は、この戻り値だけで表示を合わせる（全件の読み直しや起動データの取り直しをしない）
+    var saved = strip_(cur);
+    Object.keys(next).forEach(function (k) { saved[k] = next[k]; });
+    return { ok: true, updated_at: next.updated_at, item: saved, summary: refreshSummary_(cur.project_id) };
   });
 }
 
@@ -173,6 +206,7 @@ function saveItem(patch) {
  * @param data { project_id, parent_item_id?, name, item_type, assignee_user_id, status, start_date, end_date, progress_rate }
  */
 function addItem(data) {
+  var me = currentUser_();
   return withLock_(function () {
     var project = findById_('projects', data.project_id);
     if (!project) throw new Error('プロジェクトが見つかりません');
@@ -205,16 +239,16 @@ function addItem(data) {
       status: data.status || STATUS.NOT_STARTED,
       start_date: data.start_date || '',
       end_date: data.end_date || '',
-      progress_rate: data.status === STATUS.DONE ? 100 : clampRate_(data.progress_rate),
-      created_at: now_(),
-      updated_at: now_()
+      progress_rate: data.status === STATUS.DONE ? 100 : clampRate_(data.progress_rate)
     };
+    stampNew_(item, me);
     insertRow_('items', item);
-    updateRow_('projects', project.project_id, { next_item_seq: seq + 1, updated_at: now_() });
+    // 連番だけを進める。プロジェクトの更新日時は変えない
+    // （変えると、設定画面を開いている人が「ほかの人が先に更新しています」で保存できなくなる）
+    updateRow_('projects', project.project_id, { next_item_seq: seq + 1 });
 
     if (item.assignee_user_id) notifyAssignChange_(item, '', item.assignee_user_id);
-    refreshSummary_(item.project_id);
-    return strip_(item);
+    return { item: strip_(item), summary: refreshSummary_(item.project_id) };
   });
 }
 
@@ -229,8 +263,11 @@ function deleteItem(itemId, withChildren) {
     }
     kids.forEach(function (k) { deleteRow_('items', k.item_id); });
     deleteRow_('items', itemId);
-    refreshSummary_(cur.project_id);
-    return { ok: true, deleted: kids.length + 1 };
+    return {
+      ok: true, deleted: kids.length + 1,
+      ids: [itemId].concat(kids.map(function (k) { return k.item_id; })),
+      summary: refreshSummary_(cur.project_id)
+    };
   });
 }
 
@@ -332,6 +369,7 @@ function cleanFieldValues_(defs, values) {
 
 /** プロジェクトの設定を保存する */
 function saveProject(patch) {
+  var me = currentUser_();
   return withLock_(function () {
     var cur = findById_('projects', patch.project_id);
     if (!cur) throw new Error('プロジェクトが見つかりません');
@@ -359,9 +397,9 @@ function saveProject(patch) {
       owner_user_id: patch.owner_user_id || cur.owner_user_id,
       status: patch.status || cur.status,
       start_date: patch.start_date || '',
-      end_date: patch.end_date || '',
-      updated_at: now_()
+      end_date: patch.end_date || ''
     };
+    stampEdit_(next, me);
     // テンプレート由来の項目は画面から変えさせない（名前・型・必須はプロジェクトが持つ控えのまま）
     var curDefs = fieldDefsOf_(cur);
     var tDefs = curDefs.filter(function (d) { return d.source === 'template'; });
@@ -371,8 +409,13 @@ function saveProject(patch) {
     next.field_defs = tDefs.concat(pDefs);
     next.custom_fields = cleanFieldValues_(next.field_defs, patch.custom_fields);
     updateRow_('projects', cur.project_id, next);
-    refreshSummary_(cur.project_id);
-    return { ok: true, updated_at: next.updated_at, field_defs: next.field_defs, custom_fields: next.custom_fields };
+    var saved = strip_(cur);
+    Object.keys(next).forEach(function (k) { saved[k] = next[k]; });
+    return {
+      ok: true, updated_at: next.updated_at, updated_by: next.updated_by, updated_by_name: next.updated_by_name,
+      field_defs: next.field_defs, custom_fields: next.custom_fields,
+      project: saved, summary: refreshSummary_(cur.project_id)
+    };
   });
 }
 
@@ -381,6 +424,7 @@ function saveProject(patch) {
  * テンプレートの相対日数を実日付に展開する。
  */
 function createProject(data) {
+  var me = currentUser_();
   return withLock_(function () {
     if (!String(data.name || '').trim()) throw new Error('プロジェクト名は必須です');
     if (!data.start_date) throw new Error('開始日は必須です');
@@ -435,34 +479,38 @@ function createProject(data) {
       description: data.description || '',
       template_id: tpl ? tpl.template_id : '',
       template_name: tpl ? tpl.name : '',
-      owner_user_id: data.owner_user_id || (currentUser_() || {}).user_id || '',
+      owner_user_id: data.owner_user_id || (me || {}).user_id || '',
       status: STATUS.NOT_STARTED,
       start_date: data.start_date,
       end_date: endDate,
       custom_fields: fieldValues,
       field_defs: fieldDefs,
-      next_item_seq: tplItems.length + 1,
-      created_at: now_(),
-      updated_at: now_()
+      next_item_seq: tplItems.length + 1
     };
+    stampNew_(project, me);
     insertRow_('projects', project);
 
     // タスクを展開する。親を先に作り、id の対応表で子をつなぐ
-    var idMap = {};
+    var idMap = {}, created = [];
     var seq = 1;
     tplItems.filter(function (t) { return Number(t.level) === 1; }).forEach(function (t) {
       var id = uuid_();
       idMap[t.template_item_id] = id;
-      insertRow_('items', buildItem_(id, project, t, '', seq++, data.start_date));
+      var row1 = stampNew_(buildItem_(id, project, t, '', seq++, data.start_date), me);
+      insertRow_('items', row1); created.push(strip_(row1));
     });
     tplItems.filter(function (t) { return Number(t.level) === 2; }).forEach(function (t) {
       var parentId = idMap[t.parent_template_item_id] || '';
-      insertRow_('items', buildItem_(uuid_(), project, t, parentId, seq++, data.start_date));
+      var row2 = stampNew_(buildItem_(uuid_(), project, t, parentId, seq++, data.start_date), me);
+      insertRow_('items', row2); created.push(strip_(row2));
     });
     updateRow_('projects', pid, { next_item_seq: seq });
 
-    refreshSummary_(pid);
-    return strip_(project);
+    var out = strip_(project);
+    out.next_item_seq = seq;
+    out.summary = refreshSummary_(pid);
+    out.items = created;
+    return out;
   });
 }
 
@@ -554,6 +602,7 @@ function saveRole(data) {
     if (!admins.length) {
       throw new Error('管理者が0人になってしまいます。誰か1人は管理者のままにしてください');
     }
+    try { CacheService.getScriptCache().remove('me:' + email.toLowerCase()); } catch (e) {}
     return getRoles();
   });
 }
@@ -582,9 +631,14 @@ function getTemplates() {
     });
 }
 
+/** テンプレートの中身（タスク構成・設定項目）を変えたとき、テンプレート自体の更新日時・更新者も進める */
+function touchTemplate_(templateId, me) {
+  if (templateId && findById_('templates', templateId)) updateRow_('templates', templateId, stampEdit_({}, me));
+}
+
 function createTemplate(data) {
   return withLock_(function () {
-    assertAdmin_();
+    var me = assertAdmin_();
     if (!String(data.name || '').trim()) throw new Error('テンプレート名は必須です');
     var prefix = String(data.key_prefix || '').trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
@@ -593,9 +647,9 @@ function createTemplate(data) {
     var tpl = {
       template_id: uuid_(), name: data.name, description: data.description || '',
       key_prefix: prefix, active: true,
-      sort_order: (readAll_('templates').length + 1) * 100,
-      created_at: now_(), updated_at: now_()
+      sort_order: (readAll_('templates').length + 1) * 100
     };
+    stampNew_(tpl, me);
     insertRow_('templates', tpl);
     return strip_(tpl);
   });
@@ -603,7 +657,7 @@ function createTemplate(data) {
 
 function updateTemplate(data) {
   return withLock_(function () {
-    assertAdmin_();
+    var me = assertAdmin_();
     var cur = findById_('templates', data.template_id);
     if (!cur) throw new Error('テンプレートが見つかりません');
     if (!String(data.name || '').trim()) throw new Error('テンプレート名は必須です');
@@ -611,10 +665,10 @@ function updateTemplate(data) {
     if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
       throw new Error('キーの接頭辞は英大文字で始まる2〜10文字の英数字にしてください（例：WEB）');
     }
-    updateRow_('templates', cur.template_id, {
+    updateRow_('templates', cur.template_id, stampEdit_({
       name: data.name, description: data.description || '', key_prefix: prefix,
-      active: data.active !== false, updated_at: now_()
-    });
+      active: data.active !== false
+    }, me));
     return { ok: true };
   });
 }
@@ -635,7 +689,8 @@ function deleteTemplate(templateId) {
 /** タスク構成の1行を足す／直す／消す。data.template_item_id が有れば更新、無ければ追加 */
 function saveTemplateItem(data) {
   return withLock_(function () {
-    assertAdmin_();
+    var me = assertAdmin_();
+    touchTemplate_(data.template_id, me);
     if (!String(data.name || '').trim()) throw new Error('タスク名は必須です');
     var level = data.parent_template_item_id ? 2 : 1;
     var row = {
@@ -663,7 +718,9 @@ function saveTemplateItem(data) {
 
 function deleteTemplateItem(templateItemId) {
   return withLock_(function () {
-    assertAdmin_();
+    var me = assertAdmin_();
+    var ti = findById_('template_items', templateItemId);
+    if (ti) touchTemplate_(ti.template_id, me);
     // 親を消すときは、配下の子タスク定義も一緒に消す
     readAll_('template_items').filter(function (x) { return x.parent_template_item_id === templateItemId; })
       .forEach(function (x) { deleteRow_('template_items', x.template_item_id); });
@@ -675,7 +732,8 @@ function deleteTemplateItem(templateItemId) {
 /** 設定項目の定義を足す／直す／消す */
 function saveTemplateField(data) {
   return withLock_(function () {
-    assertAdmin_();
+    var me = assertAdmin_();
+    touchTemplate_(data.template_id, me);
     var key = String(data.field_key || '').trim();
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key)) {
       throw new Error('項目キーは英字で始まる英数字とアンダースコアにしてください（例：client_name）');
@@ -706,7 +764,13 @@ function saveTemplateField(data) {
 }
 
 function deleteTemplateField(fieldId) {
-  return withLock_(function () { assertAdmin_(); deleteRow_('template_fields', fieldId); return { ok: true }; });
+  return withLock_(function () {
+    var me = assertAdmin_();
+    var f = findById_('template_fields', fieldId);
+    if (f) touchTemplate_(f.template_id, me);
+    deleteRow_('template_fields', fieldId);
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------- 集計キャッシュ
@@ -737,6 +801,8 @@ function refreshSummary_(projectId) {
   };
   if (findById_('summary_cache', projectId)) updateRow_('summary_cache', projectId, row);
   else insertRow_('summary_cache', row);
+  row.stale = false;
+  return row;
 }
 
 /** 全プロジェクトを計算し直す（毎朝のトリガーから呼ぶ） */

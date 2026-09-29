@@ -63,6 +63,7 @@
 
   // ---------------------------------------------------------------- 起動
   function boot() {
+    loadItems();                           // ② タスク全件も同時に取りに行く（①を待たない）
     google.script.run
       .withSuccessHandler(function (d) {
         S.today = d.today; S.me = d.me; S.users = d.users; S.projects = d.projects;
@@ -74,8 +75,9 @@
         S.peopleSource = d.peopleSource || 'ローカル';
         S.peopleNote = d.peopleNote || '';
         renderNav();
+        S.booted = true;
         applyInitialRoute();               // URLで指定された画面を開く
-        loadItems();                       // ② 裏で読む。画面はもう出ている
+        if (S.items !== null) openPendingTask();
         if (S.peopleNote) toast(S.peopleNote, S.peopleSource !== 'common');
       })
       .withFailureHandler(fail)
@@ -84,7 +86,11 @@
 
   function loadItems() {
     google.script.run
-      .withSuccessHandler(function (items) { S.items = items; render(); openPendingTask(); })
+      .withSuccessHandler(function (items) {
+        S.items = items;
+        if (!S.booted) return;             // 起動データがまだなら、そちらが描く
+        render(); openPendingTask();
+      })
       .withFailureHandler(fail)
       .getItems();
   }
@@ -126,6 +132,23 @@
     { key: 'rules', ico: '?', label: '判定ルール' },
     { key: 'notifications', ico: '🔔', label: 'お知らせ' }
   ];
+
+  function labelTables(root) {
+    (root || document).querySelectorAll('table.tbl').forEach(function (t) {
+      var ths = t.querySelectorAll('thead th');
+      if (!ths.length) return;
+      var names = Array.prototype.map.call(ths, function (th) { return th.textContent.trim(); });
+      t.querySelectorAll('tbody tr').forEach(function (tr) {
+        var col = 0;
+        Array.prototype.forEach.call(tr.children, function (td) {
+          if (!td.hasAttribute('data-label') && names[col] && col > 0) td.setAttribute('data-label', names[col]);
+          col += Number(td.getAttribute('colspan') || 1);
+        });
+      });
+    });
+  }
+  new MutationObserver(function () { labelTables($('main')); })
+    .observe(document.getElementById('main'), { childList: true, subtree: true });
 
   function renderNav() {
     $('sidebar').innerHTML = NAV.map(function (n) {
@@ -262,7 +285,38 @@
   }
 
   // ---------------------------------------------------------------- 描画
+  /*
+   * 描き直しても横スクロールの位置を保つ（ガントやボードで保存するたびに左端へ戻らないように）。
+   * 別の画面・別のタブへ移ったときは保たず、ガントは「今日」が見える位置から始める。
+   */
+  var scrollKey = '';
+  var renderDeferred = false;
+  function viewKey() { return [S.view, S.projectId, S.tab, S.projectsTab, S.peopleTab, S.memberUserId].join('|'); }
+  function hScrollers() { return Array.prototype.slice.call(document.querySelectorAll('#main .gantt-scroll, #main .board-wrap')); }
+  function scrollToToday(sc) {
+    var line = sc.querySelector('.g-rows .g-today');
+    var label = sc.querySelector('.g-label');
+    if (!line || !label || sc.scrollWidth <= sc.clientWidth) return;
+    var x = line.getBoundingClientRect().left - sc.getBoundingClientRect().left + sc.scrollLeft;
+    var visible = sc.clientWidth - label.offsetWidth;
+    sc.scrollLeft = Math.max(0, x - label.offsetWidth - visible * 0.3);
+  }
+
   function render() {
+    // 指やマウスで押している最中に描き直すと、つかんでいる要素が差し替わって操作が壊れる。離すまで待つ
+    if (typeof dg !== 'undefined' && dg) { renderDeferred = true; return; }
+    var key = viewKey();
+    var keep = key === scrollKey ? hScrollers().map(function (el) { return el.scrollLeft; }) : null;
+    renderView();
+    markPending();
+    hScrollers().forEach(function (el, i) {
+      if (keep && keep[i] !== undefined) el.scrollLeft = keep[i];
+      else if (el.classList.contains('gantt-scroll')) scrollToToday(el);
+    });
+    scrollKey = key;
+  }
+
+  function renderView() {
     var m = $('main');
     if (S.view === 'projects') m.innerHTML = viewProjects();
     else if (S.view === 'detail') m.innerHTML = viewDetail();
@@ -306,6 +360,38 @@
     if (calc.remainingDays < 0) return '<span class="faint">—</span>';
     return '<span class="num faint">あと ' + calc.remainingDays + ' 日</span>';
   }
+  /** '2026-09-28T14:03:00+09:00' → '9/28(月) 14:03'（今年でなければ年も付ける） */
+  function fmtStamp(iso) {
+    var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (!m) return iso ? String(iso) : '';
+    var w = '日月火水木金土'.charAt(new Date(+m[1], +m[2] - 1, +m[3]).getDay());
+    return (m[1] !== String(S.today).slice(0, 4) ? m[1] + '/' : '') + (+m[2]) + '/' + (+m[3]) + '(' + w + ') ' + m[4] + ':' + m[5];
+  }
+  function stampText(iso, name) {
+    if (!iso) return '記録なし';
+    return fmtStamp(iso) + (name ? ' ' + name : '');
+  }
+  /** 登録と最終更新を1行で（編集の小窓・設定画面に出す） */
+  function stampLine(o) {
+    return '<div class="stamp">' +
+      '<span><b>最終更新</b> ' + esc(stampText(o.updated_at, o.updated_by_name)) + '</span>' +
+      '<span><b>登録</b> ' + esc(stampText(o.created_at, o.created_by_name)) + '</span></div>';
+  }
+  /** プロジェクトが最後に触られた時。プロジェクト自体とその配下のタスクのうち、いちばん新しいもの */
+  function latestActivity(p) {
+    var best = { at: p.updated_at || '', name: p.updated_by_name || '', what: '' };
+    (S.items || []).forEach(function (x) {
+      if (x.project_id === p.project_id && String(x.updated_at || '') > best.at) {
+        best = { at: x.updated_at, name: x.updated_by_name || '', what: 'タスク「' + x.name + '」' };
+      }
+    });
+    return best;
+  }
+  function latestText(p) {
+    var a = latestActivity(p);
+    return a.at ? '最終更新 ' + stampText(a.at, a.name) + (a.what ? '（' + a.what + '）' : '') : '';
+  }
+
   function periodText(s, e) {
     if (!s || !e) return '<span class="faint">期間未設定</span>';
     return '<span class="num">' + H.formatDate(s) + ' 〜 ' + H.formatDate(e) + '</span> <span class="faint">' + H.durationDays(s, e) + '日</span>';
@@ -414,7 +500,7 @@
       var c = r.calc || {};
       var nameHtml =
         (r.itemType ? typeChip(r.itemType) + ' ' : '') +
-        (r.itemKey ? '<span class="faint" style="flex-shrink:0;font-size:13px">' + esc(r.itemKey) + '</span> ' : '') +
+        (r.itemKey ? '<span class="faint g-key" style="flex-shrink:0;font-size:13px">' + esc(r.itemKey) + '</span> ' : '') +
         (r.href ? '<a class="link" href="javascript:void(0)" data-edit="' + esc(r.href) + '" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.name) + '</a>'
                 : '<span class="txt">' + esc(r.name) + '</span>');
 
@@ -434,9 +520,12 @@
       var meta = r.metaHtml !== undefined ? r.metaHtml
         : (periodText(r.startDate, r.endDate) + (r.startDate && r.endDate ? ' ・ ' + dueText(c) : '') + (r.tag ? ' ・ ' + esc(r.tag) : ''));
 
+      // スマホでは名前の欄を細くするので、期間を短く書いた1行（g-mdates）に差し替える
+      var shortMeta = (r.startDate && r.endDate)
+        ? '<div class="g-mdates">' + esc(shortRange(r.startDate, r.endDate)) + ' ・ ' + dueText(c) + '</div>' : '';
       var label = '<div class="g-label"><div class="g-name">' + nameHtml +
         (c.health === 'delayed' ? ' <span class="badge delayed" style="padding:2px 9px;font-size:12px"><span aria-hidden="true">!</span>遅延</span>' : '') +
-        '</div><div class="g-dates">' + meta + '</div></div>';
+        '</div><div class="g-dates">' + meta + '</div>' + shortMeta + '</div>';
 
       if (!r.startDate || !r.endDate) {
         return '<div class="g-row lv' + (r.level || 1) + '">' + label + '<div class="g-track">' + lines + todayLine + '</div></div>';
@@ -458,12 +547,17 @@
     return '<div class="gantt-scroll"><div class="gantt" data-min="' + esc(min) + '" data-span="' + axis.span + '">' + head + '<div class="g-rows">' + body + '</div></div></div>';
   }
 
+  function shortRange(s, e) {
+    var f = function (iso) { var d = H.parse(iso); return (d.getMonth() + 1) + '/' + d.getDate(); };
+    return f(s) + '〜' + f(e);
+  }
+
   function ganttLegend() {
     return '<div class="gantt-legend">' +
       '<span><i style="background:var(--h-on-track)"></i>濃い部分＝進んだぶん</span>' +
       '<span><i style="background:var(--h-on-track);opacity:.28"></i>薄い部分＝残り</span>' +
       '<span><i style="width:2px;background:var(--today-line)"></i>今日</span>' +
-      '<span>目盛りの数字＝その線の日付（週表示は月曜、月表示は1日）</span>' +
+      '<span class="lg-extra">目盛りの数字＝その線の日付（週表示は月曜、月表示は1日）</span>' +
       '<span>バーの色＝状態（緑 対応中／赤 遅延／青 完了／灰 開始前）</span>' +
       '<span class="gantt-howto">バーを左右に動かす＝日程をずらす・端を動かす＝開始日／終了日を変える（タッチは長押ししてから）</span></div>';
   }
@@ -508,7 +602,8 @@
       return '<tr>' +
         '<td><div class="cell"><a class="t" data-project="' + esc(p.project_id) + '">' + esc(p.name) + '</a>' +
           '<span class="s">' + esc(p.key) + ' ・ ' + esc(p.template_name || 'テンプレートなし') +
-          (c.delayed_count > 0 ? ' ・ <span class="late">配下の遅延 ' + c.delayed_count + '件</span>' : '') + '</span></div></td>' +
+          (c.delayed_count > 0 ? ' ・ <span class="late">配下の遅延 ' + c.delayed_count + '件</span>' : '') + '</span>' +
+          (latestText(p) ? '<span class="s upd">' + esc(latestText(p)) + '</span>' : '') + '</div></td>' +
         '<td>' + badge(calc.health) + '</td>' +
         '<td>' + progBar(calc) + '</td>' +
         '<td class="col-hide">' + dueText(calc) + '</td>' +
@@ -542,7 +637,7 @@
           optionList([['delayed', '遅延している順'], ['due', '期限が近い順'], ['name', '名前順']], S.pf.sort) + '</select>' +
         '<label class="label" style="cursor:pointer"><input type="checkbox" id="f-done"' +
           (S.pf.done ? ' checked' : '') + '> 完了も表示</label>' +
-        '<span class="spacer"></span><span class="count">' + rows.length + ' / ' + S.projects.length + ' 件</span></div>' +
+        '<span class="spacer"></span><span class="count">' + shown.length + ' / ' + S.projects.length + ' 件</span></div>' +
       '<section class="card"><div class="tbl-wrap">' +
         (rows.length
           ? '<table class="tbl"><colgroup><col><col style="width:128px"><col style="width:190px">' +
@@ -623,7 +718,8 @@
     var tab = DETAIL_TABS.some(function (t) { return t.k === S.tab; }) ? S.tab : 'overview';
 
     var crumb = '<div class="breadcrumb"><a data-nav="projects">プロジェクト一覧</a> ／ ' + esc(p.name) + '</div>';
-    var pageHead = head(p.name, esc(p.key) + ' ・ ' + esc(p.template_name || 'テンプレートなし') + ' ・ ' + esc(userName(p.owner_user_id)),
+    var pageHead = head(p.name, esc(p.key) + ' ・ ' + esc(p.template_name || 'テンプレートなし') + ' ・ ' + esc(userName(p.owner_user_id)) +
+        (latestText(p) ? '<div class="upd">' + esc(latestText(p)) + '</div>' : ''),
       tab === 'settings' ? '' : '<button class="btn primary" data-add="' + esc(p.project_id) + '">＋ タスクを追加</button>');
     var tabsHtml = '<div class="tabs">' + DETAIL_TABS.map(function (t) {
       return '<button data-tab="' + t.k + '"' + (t.k === tab ? ' class="active"' : '') + '>' + t.label + '</button>';
@@ -748,7 +844,8 @@
           return '<tr>' +
             '<td><div class="cell">' + typeChip(n.item_type) +
               ' <a class="link" href="javascript:void(0)" data-edit="' + esc(n.item_id) + '" style="display:inline">' + esc(n.name) + '</a>' +
-              '<span class="s">' + esc(n.item_key) + (parent ? ' ・ └ ' + esc(parent.name) : '') + '</span></div></td>' +
+              '<span class="s">' + esc(n.item_key) + (parent ? ' ・ └ ' + esc(parent.name) : '') + '</span>' +
+              '<span class="s upd">最終更新 ' + esc(stampText(n.updated_at, n.updated_by_name)) + '</span></div></td>' +
             '<td class="col-hide">' + periodText(n.start_date, n.end_date) + '</td>' +
             '<td>' + progBar(calc) + '</td>' +
             '<td class="col-hide">' + dueText(calc) + '</td>' +
@@ -1298,13 +1395,16 @@
     // ⑮ 設定（お知らせ）の保存
     var stSave = $('st-save');
     if (stSave) stSave.addEventListener('click', function () {
-      stSave.disabled = true;
+      stSave.disabled = true; stSave.textContent = '保存しています…';
+      beginSave('settings');
       var patch = {
         notify_assign: $('st-notify_assign').checked, notify_due: $('st-notify_due').checked,
         notify_delayed: $('st-notify_delayed').checked, notify_keep_days: Number($('st-keep').value || 90)
       };
-      google.script.run.withSuccessHandler(function (s) { S.settings = s; stSave.disabled = false; toast('保存しました'); })
-        .withFailureHandler(function (err) { stSave.disabled = false; fail(err); }).saveSettings(patch);
+      google.script.run.withSuccessHandler(function (s) {
+        endSave('settings'); S.settings = s; stSave.disabled = false; stSave.textContent = '保存';
+        doneToast('お知らせの設定を保存しました');
+      }).withFailureHandler(function (err) { endSave('settings'); stSave.disabled = false; stSave.textContent = '保存'; fail(err); }).saveSettings(patch);
     });
 
     var t = $('s-text');
@@ -1366,11 +1466,18 @@
     clearTimeout(d.timer);
     if (d.raf) cancelAnimationFrame(d.raf);
     document.body.classList.remove('is-dragging');
-    if (!d.started) return;
-    // 離した直後にブラウザが出すクリック（編集が開く等）だけを無視する。
-    // マウスは pointerup の直後に続けて出るので短い時間で足りる（長くすると次の操作まで消してしまう）
-    dragClickBlockUntil = Date.now() + 50;
-    if (cancelled) d.def.cancel(); else d.def.end({ x: d.x, y: d.y });
+    if (d.started) {
+      // 離した直後にブラウザが出すクリック（編集が開く等）だけを無視する。
+      // マウスは pointerup の直後に続けて出るので短い時間で足りる（長くすると次の操作まで消してしまう）
+      dragClickBlockUntil = Date.now() + 50;
+      if (cancelled) d.def.cancel(); else d.def.end({ x: d.x, y: d.y });
+    }
+    flushRender();
+  }
+
+  /** 押している間に待たせた描き直しを、離したあとで1回だけ行う */
+  function flushRender() {
+    if (renderDeferred && !dg) { renderDeferred = false; render(); }
   }
 
   /** 入れ物の端や画面の上下に寄せている間、そちらへ少しずつスクロールする */
@@ -1439,6 +1546,7 @@
       if (Math.abs(t.clientX - dg.sx) + Math.abs(t.clientY - dg.sy) > DRAG_SLOP_PX * 2) {
         dg.el.classList.remove('press');
         clearTimeout(dg.timer); dg = null;
+        flushRender();
       }
       return;
     }
@@ -1559,6 +1667,7 @@
     var p = project(pid);
     if (!p) return;
     p.start_date = s; p.end_date = e;
+    beginSave('p:' + pid);
     render();
     runServer('saveProject', {
       project_id: p.project_id, updated_at: p.updated_at,
@@ -1567,13 +1676,15 @@
       start_date: s, end_date: e,
       field_defs: p.field_defs, custom_fields: p.custom_fields
     }).then(function (r) {
-      p.updated_at = r.updated_at;
-      if (r.field_defs) p.field_defs = r.field_defs;
-      if (r.custom_fields) p.custom_fields = r.custom_fields;
-      toast(isUndo ? '元に戻しました' : '「' + p.name + '」の期間を ' + H.formatDate(s) + ' 〜 ' + H.formatDate(e) + ' にしました', false,
+      endSave('p:' + pid);
+      Object.keys(r.project).forEach(function (k) { p[k] = r.project[k]; });
+      applySummary(r.summary);
+      render();
+      // 「保存しました」系の表示は、サーバーの保存が終わったここで初めて出す
+      doneToast(isUndo ? '「' + p.name + '」の期間を元に戻しました' : '「' + p.name + '」の期間を ' + H.formatDate(s) + ' 〜 ' + H.formatDate(e) + ' にしました',
         isUndo ? null : { label: '元に戻す', fn: function () { saveProjectDates(pid, s0, e0, s, e, true); } });
-      refreshSummarySoon();
     }).catch(function (err) {
+      endSave('p:' + pid);
       p.start_date = s0; p.end_date = e0;
       render();
       fail(err);
@@ -1642,21 +1753,85 @@
     });
   }
 
-  /** 保存のあと、一覧の集計（状態・進捗）を少し遅らせて1回だけ取り直す */
-  var summaryTimer = null;
-  function refreshSummarySoon() {
-    clearTimeout(summaryTimer);
-    summaryTimer = setTimeout(function () {
-      runServer('getBootstrap').then(function (d) {
-        d.summary.forEach(function (x) { S.summary[x.project_id] = x; });
-        if (S.view === 'projects') render();
-      }).catch(function () {});
-    }, 800);
+  /** 保存の戻り値に入っている集計（そのプロジェクトの1行）で一覧を合わせる */
+  function applySummary(s) { if (s && s.project_id) S.summary[s.project_id] = s; }
+
+  /** サーバーが返した保存後のタスクで、手元の1件を置き換える（無ければ足す） */
+  function mergeItem(saved) {
+    if (!saved || S.items === null) return;
+    var it = itemById(saved.item_id);
+    if (!it) { S.items.push(saved); return; }
+    Object.keys(saved).forEach(function (k) { it[k] = saved[k]; });
   }
+
+  /*
+   * 保存中の管理。
+   * 【決まり】保存が終わる前に「終わった」と見える表示をしない。
+   *   - 保存中のあいだ、画面上部に「保存中…」を出し、変えた行・バー・カードには「保存中…」の印を付ける
+   *   - 「保存しました」「元に戻す」は、サーバーが保存を終えて返事をしてから出す
+   *   - 保存中にページを閉じようとしたら止める
+   */
+  S.pending = {};
+  var pendingCount = 0;
+  function beginSave(key) {
+    // 前の保存の「保存しました」が残っていると、今の保存も終わったように見える。新しい保存を始めたら消す
+    var t = $('toast');
+    if (t && !t.hidden && !t.classList.contains('err')) { t.hidden = true; clearTimeout(toastTimer); }
+    pendingCount++;
+    if (key) S.pending[key] = (S.pending[key] || 0) + 1;
+    showSaving();
+  }
+  function endSave(key) {
+    pendingCount = Math.max(0, pendingCount - 1);
+    if (key && S.pending[key]) { if (--S.pending[key] <= 0) delete S.pending[key]; }
+    showSaving();
+    markPending();
+  }
+  /** 保存が終わったときの知らせ。ほかにまだ保存中のものがあれば書き添える（全部終わったと誤解させない） */
+  function doneToast(msg, action) {
+    toast(msg + (pendingCount > 0 ? '（ほかに保存中 ' + pendingCount + '件）' : ''), false, action);
+  }
+  function showSaving() {
+    var el = $('saving');
+    if (!el) {
+      el = document.createElement('span');
+      el.id = 'saving'; el.className = 'saving-ind'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+      var bell = $('btn-bell');
+      bell.parentNode.insertBefore(el, bell);
+    }
+    el.hidden = pendingCount === 0;
+    el.innerHTML = '<i aria-hidden="true"></i>保存中…' + (pendingCount > 1 ? '（' + pendingCount + '件）' : '');
+  }
+  /** 保存中の行・バー・カードに印を付ける（描き直すたびに付け直す） */
+  function markPending() {
+    document.querySelectorAll('.is-saving').forEach(function (el) {
+      el.classList.remove('is-saving');
+      el.querySelectorAll('.saving-pill').forEach(function (x) { x.remove(); });
+    });
+    Object.keys(S.pending).forEach(function (k) {
+      if (k === 'new') return;
+      var sel = k.indexOf('p:') === 0
+        ? '[data-gbar="project:' + k.slice(2) + '"], a[data-project="' + k.slice(2) + '"]'
+        : '[data-edit="' + k + '"], [data-drag="' + k + '"], [data-status="' + k + '"], [data-rate="' + k + '"]';
+      document.querySelectorAll('#main ' + sel.split(', ').join(', #main ')).forEach(function (el) {
+        var host = el.closest('tr, .tree-row, .g-row, .tcard') || el;
+        host.classList.add('is-saving');
+        var bar = host.querySelector('.g-bar, .g-span');
+        if (bar) bar.classList.add('is-saving');
+        if (host.querySelector('.saving-pill')) return;
+        var slot = host.querySelector('.g-name, .tcard .top, .tree-row .name, td');
+        (slot || host).insertAdjacentHTML('beforeend', '<span class="saving-pill">保存中…</span>');
+      });
+    });
+  }
+  window.addEventListener('beforeunload', function (e) {
+    if (pendingCount > 0) { e.preventDefault(); e.returnValue = ''; }
+  });
 
   /**
    * タスクの一部（ステータス・進捗率・開始日・終了日）だけを変えて保存する（F-4-4、ボード、ガント）。
-   * 画面は先に変えて、保存は裏で行う。同じタスクへの保存は順番に送る（更新日時の食い違いを防ぐ）。
+   * 動かした位置・選んだ値はそのまま見せるが、保存が終わるまでは「保存中…」の印を付ける（終わったようには見せない）。
+   * 同じタスクへの保存は順番に送る（更新日時の食い違いを防ぐ）。
    * 失敗したら、サーバーの内容を読み直して画面を正しい状態に戻す。
    * opts: { msg: 保存後に出す文, undo: 取り消すときに戻す値 }
    */
@@ -1669,12 +1844,15 @@
       if (patch[k] !== undefined) it[k] = patch[k];
     });
     if (it.status === 'done') it.progress_rate = 100;
+    beginSave(itemId);
     render();
 
     var mySeq = saveSeq[itemId] = (saveSeq[itemId] || 0) + 1;
+    var ended = false;
+    function finish() { if (!ended) { ended = true; endSave(itemId); } }
     saveChains[itemId] = (saveChains[itemId] || Promise.resolve()).then(function () {
       // あとから同じタスクの保存が積まれていれば、そちらが最新の内容を送るので、ここは送らない
-      if (mySeq !== saveSeq[itemId]) return;
+      if (mySeq !== saveSeq[itemId]) { finish(); return; }
       return runServer('saveItem', {
         item_id: it.item_id, updated_at: it.updated_at,
         name: it.name, description: it.description || '',
@@ -1682,14 +1860,25 @@
         status: it.status, start_date: it.start_date, end_date: it.end_date,
         progress_rate: it.progress_rate
       }).then(function (r) {
-        it.updated_at = r.updated_at;
-        toast(opts.msg || '保存しました', false, opts.undo ? {
-          label: '元に戻す',
-          fn: function () { quickSave(itemId, opts.undo, { msg: '元に戻しました' }); }
-        } : null);
-        refreshSummarySoon();
+        var newerQueued = mySeq !== saveSeq[itemId];
+        if (newerQueued) {
+          // このあとにもう1つ保存が控えている。画面の値（新しい方）は残し、更新日時・更新者だけ合わせる
+          ['updated_at', 'updated_by', 'updated_by_name'].forEach(function (k) { it[k] = r.item[k]; });
+        } else {
+          mergeItem(r.item);
+        }
+        applySummary(r.summary);
+        finish();
+        render();
+        if (!newerQueued) {
+          doneToast(opts.msg || '「' + it.name + '」を保存しました', opts.undo ? {
+            label: '元に戻す',
+            fn: function () { quickSave(itemId, opts.undo, { msg: '「' + it.name + '」を元に戻しました' }); }
+          } : null);
+        }
       });
     }).catch(function (err) {
+      finish();
       fail(err);
       loadItems();
     });
@@ -2053,13 +2242,15 @@
     btn.disabled = true; btn.textContent = '作成しています…';
     google.script.run
       .withSuccessHandler(function (p) {
+        var created = p.items || [], sum = p.summary;
+        delete p.items; delete p.summary;
         S.projects.push(p);
-        S.items = null;
+        if (S.items !== null) S.items = S.items.concat(created);
+        applySummary(sum);
+        S.projectId = p.project_id; S.tab = 'overview';
+        go('detail');
+        if (S.items === null) loadItems();
         toast('「' + p.name + '」を作成しました');
-        google.script.run.withSuccessHandler(function (d) {
-          d.summary.forEach(function (s) { S.summary[s.project_id] = s; });
-          S.projectId = p.project_id; go('detail'); loadItems();
-        }).withFailureHandler(fail).getBootstrap();
       })
       .withFailureHandler(function (err) {
         btn.disabled = false; btn.textContent = 'この内容で作成';
@@ -2080,6 +2271,7 @@
   // ---- プロジェクト設定 ----
   function projectSettings(p) {
     return '<section class="card"><div class="card-body" style="max-width:620px">' +
+      stampLine(p) +
       '<div class="row2">' +
         '<div class="field"><label for="p-name">名称</label><input id="p-name" type="text" value="' + esc(p.name) + '"></div>' +
         '<div class="field"><label for="p-key">キー</label><input id="p-key" type="text" maxlength="10" value="' + esc(p.key) + '" style="text-transform:uppercase">' +
@@ -2107,21 +2299,17 @@
     var btn = e.target;
     var fc = feCollect('p');
     if (!feCheck(fc)) return;
-    btn.disabled = true;
+    btn.disabled = true; btn.textContent = '保存しています…';
+    beginSave('p:' + p.project_id);
     google.script.run
       .withSuccessHandler(function (r) {
-        p.name = $('p-name').value; p.description = $('p-desc').value;
-        p.start_date = $('p-start').value; p.end_date = $('p-end').value;
-        p.owner_user_id = $('p-owner').value; p.status = $('p-status').value;
-        p.key = $('p-key').value.toUpperCase();
-        p.field_defs = r.field_defs;
-        p.custom_fields = r.custom_fields;
-        p.updated_at = r.updated_at;
-        btn.disabled = false;
-        toast('保存しました');
+        endSave('p:' + p.project_id);
+        Object.keys(r.project).forEach(function (k) { p[k] = r.project[k]; });
+        applySummary(r.summary);
         render();
+        doneToast('「' + p.name + '」の設定を保存しました');
       })
-      .withFailureHandler(function (err) { btn.disabled = false; fail(err); })
+      .withFailureHandler(function (err) { endSave('p:' + p.project_id); btn.disabled = false; btn.textContent = '保存'; fail(err); })
       .saveProject({
         project_id: p.project_id, updated_at: p.updated_at,
         name: $('p-name').value, description: $('p-desc').value,
@@ -2169,6 +2357,7 @@
       '<div class="m-head"><h2 id="modal-title">' + (isNew ? (parentIdForNew ? '子タスクを追加' : 'タスクを追加') : 'タスクの編集') + '</h2>' +
         '<span class="spacer"></span><span class="faint">' + esc(item.item_key || '(キーは自動)') + '</span></div>' +
       '<div class="m-body">' +
+        (isNew ? '' : stampLine(item)) +
         '<div class="field"><label for="t-name">タスク名</label><input id="t-name" type="text" value="' + esc(item.name) + '"></div>' +
         '<div class="field"><label for="t-desc">説明</label><textarea id="t-desc">' + esc(item.description || '') + '</textarea></div>' +
         '<div class="row2">' +
@@ -2242,29 +2431,29 @@
       progress_rate: hasKids ? null : Number($('t-rate').value || 0)
     };
     var btn = $('t-save');
-    btn.disabled = true; btn.textContent = '保存しています…';
+    btn.disabled = true; btn.textContent = isNew ? '追加しています…' : '保存しています…';
+    var key = isNew ? 'new' : item.item_id;
+    beginSave(key);
 
-    function done(msg) {
-      toast(msg);
+    // サーバーの保存が終わってから閉じて「保存しました」を出す（それまでは小窓も「保存しています…」のまま）
+    function done(r, msg) {
+      endSave(key);
+      if (r.item) mergeItem(r.item);
+      applySummary(r.summary);
       closeModal();
-      S.items = null;
       render();
-      loadItems();
-      google.script.run.withSuccessHandler(function (d) {
-        d.summary.forEach(function (s) { S.summary[s.project_id] = s; });
-        S.unread = d.unread; $('bell-dot').hidden = !d.unread;
-      }).getBootstrap();
+      doneToast('「' + payload.name + '」を' + msg);
     }
-    function ng(err) { btn.disabled = false; btn.textContent = isNew ? '追加' : '保存'; fail(err); }
+    function ng(err) { endSave(key); btn.disabled = false; btn.textContent = isNew ? '追加' : '保存'; fail(err); }
 
     if (isNew) {
       payload.project_id = item.project_id;
       payload.parent_item_id = $('t-parent') ? $('t-parent').value : '';
-      google.script.run.withSuccessHandler(function () { done('追加しました'); }).withFailureHandler(ng).addItem(payload);
+      runServer('addItem', payload).then(function (r) { done(r, '追加しました'); }, ng);
     } else {
       payload.item_id = item.item_id;
       payload.updated_at = item.updated_at;
-      google.script.run.withSuccessHandler(function () { done('保存しました'); }).withFailureHandler(ng).saveItem(payload);
+      runServer('saveItem', payload).then(function (r) { done(r, '保存しました'); }, ng);
     }
   }
 
@@ -2273,14 +2462,21 @@
       ? '子タスクが ' + kidCount + ' 件あります。まとめて削除しますか？'
       : 'このタスクを削除しますか？';
     if (!window.confirm(msg)) return;
-    google.script.run
-      .withSuccessHandler(function () {
-        toast('削除しました');
-        closeModal();
-        S.items = null; render(); loadItems();
-      })
-      .withFailureHandler(fail)
-      .deleteItem(item.item_id, kidCount > 0);
+    var btn = $('t-del');
+    if (btn) { btn.disabled = true; btn.textContent = '削除しています…'; }
+    beginSave(item.item_id);
+    runServer('deleteItem', item.item_id, kidCount > 0).then(function (r) {
+      endSave(item.item_id);
+      S.items = (S.items || []).filter(function (x) { return r.ids.indexOf(x.item_id) < 0; });
+      applySummary(r.summary);
+      closeModal();
+      render();
+      doneToast('「' + item.name + '」を削除しました');
+    }, function (err) {
+      endSave(item.item_id);
+      if (btn) { btn.disabled = false; btn.textContent = '削除'; }
+      fail(err);
+    });
   }
 
   // ---- ⑰ お知らせ ----
@@ -2394,7 +2590,11 @@
 
   function viewSettings() {
     var tab = SETTINGS_TABS.some(function (t) { return t.k === S.settingsTab; }) ? S.settingsTab : 'notify';
-    var pageHead = head('設定', 'お知らせの種類・権限・共通マスタとのつながりを管理します', '');
+    // スマホの下部タブバーには出ない画面（テンプレート・判定ルール）への入口
+    var pageHead = head('設定', 'お知らせの種類・権限・共通マスタとのつながりを管理します',
+      '<span class="m-only" style="gap:8px">' +
+        '<button class="btn sm" data-nav="templates">テンプレート</button>' +
+        '<button class="btn sm" data-nav="rules">判定ルール</button></span>');
     var tabsHtml = '<div class="tabs">' + SETTINGS_TABS.map(function (t) {
       return '<button data-stab="' + t.k + '"' + (t.k === tab ? ' class="active"' : '') + '>' + t.label + '</button>';
     }).join('') + '</div>';
@@ -2560,6 +2760,7 @@
       }).join('');
 
       right = '<section class="card" style="margin-bottom:20px"><div class="card-body">' +
+          stampLine(cur) +
           '<div class="row2">' +
             '<div class="field"><label for="tp-name">名称</label><input id="tp-name" type="text" value="' + esc(cur.name) + '"' + (isAdmin ? '' : ' disabled') + '></div>' +
             '<div class="field"><label for="tp-prefix">キーの接頭辞</label><input id="tp-prefix" type="text" maxlength="10" style="text-transform:uppercase" value="' + esc(cur.key_prefix) + '"' + (isAdmin ? '' : ' disabled') + '>' +
@@ -2599,7 +2800,7 @@
     m.innerHTML = head('テンプレート編集', 'プロジェクト作成時のタスク構成と設定項目を管理します',
         isAdmin ? '<button class="btn primary" id="tp-new">＋ 新しいテンプレート</button>' : '') +
       (isAdmin ? '' : '<div class="toolbar"><span class="help">閲覧のみです。編集できるのは管理者だけです</span></div>') +
-      '<div style="display:grid;grid-template-columns:250px minmax(0,1fr);gap:16px;align-items:start">' +
+      '<div class="tpl-layout">' +
         '<section class="card"><div class="card-head"><h2>テンプレート</h2></div><div class="tbl-wrap">' + listHtml + '</div></section>' +
         '<div>' + right + '</div>' +
       '</div>';
@@ -2614,9 +2815,12 @@
 
     var save = $('tp-save');
     if (save) save.onclick = function () {
-      save.disabled = true;
-      google.script.run.withSuccessHandler(function () { toast('保存しました'); loadTemplatesView(); })
-        .withFailureHandler(function (err) { save.disabled = false; fail(err); })
+      save.disabled = true; save.textContent = '保存しています…';
+      beginSave('tpl');
+      google.script.run.withSuccessHandler(function () {
+        endSave('tpl'); doneToast('テンプレート「' + $('tp-name').value + '」を保存しました'); loadTemplatesView();
+      })
+        .withFailureHandler(function (err) { endSave('tpl'); save.disabled = false; save.textContent = '保存'; fail(err); })
         .updateTemplate({
           template_id: cur.template_id, name: $('tp-name').value, description: $('tp-desc').value,
           key_prefix: $('tp-prefix').value, active: $('tp-active').checked
