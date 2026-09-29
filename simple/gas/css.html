@@ -322,6 +322,79 @@ textarea { resize: vertical; min-height: 72px; }
 }
 .toast.err { background: var(--h-delayed); }
 
+/* ---------------- ドラッグ（マウス・タッチ共通） ---------------- */
+[hidden] { display: none !important; }
+body.is-dragging, body.is-dragging * { -webkit-user-select: none; user-select: none; cursor: grabbing !important; }
+.g-grab, .tcard { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.gantt .g-bar.g-grab { cursor: grab; }
+.gantt .g-bar .g-h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; z-index: 2; }
+.gantt .g-bar .g-h.l { left: 0; }
+.gantt .g-bar .g-h.r { right: 0; }
+.gantt .g-bar .g-h::after { content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px; width: 2px; border-radius: 1px; background: rgba(255, 255, 255, .85); opacity: 0; }
+.gantt .g-bar.dragging, .gantt .g-span.dragging { opacity: 1; z-index: 4; box-shadow: 0 0 0 2px var(--accent), 0 4px 10px rgba(16, 24, 40, .25); }
+.gantt .g-bar.dragging.mode-start .g-h.l::after, .gantt .g-bar.dragging.mode-end .g-h.r::after { opacity: 1; }
+.gantt .g-bar.press, .gantt .g-span.press { box-shadow: 0 0 0 2px var(--accent-soft); }
+.gantt .g-span.g-grab { cursor: grab; height: 8px; }
+.gantt .g-span.g-grab::before { content: ''; position: absolute; left: 0; right: 0; top: -9px; bottom: -9px; }
+.gtip {
+  position: fixed; z-index: 70; transform: translate(-50%, -100%); pointer-events: none;
+  display: flex; flex-direction: column; gap: 2px; padding: 7px 12px; border-radius: 9px;
+  background: var(--text); color: #fff; font-size: 13px; white-space: nowrap; box-shadow: 0 6px 18px rgba(16, 24, 40, .25);
+}
+.gtip b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.gtip span { opacity: .85; }
+.gantt-howto { color: var(--text); }
+.tcard.press { transform: scale(.98); box-shadow: 0 0 0 2px var(--accent-soft); }
+.tcard.dragging { opacity: .35; }
+.tcard-ghost {
+  position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none; margin: 0;
+  box-shadow: 0 14px 32px rgba(16, 24, 40, .28); border-color: var(--accent);
+}
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast-act {
+  flex-shrink: 0; min-height: 34px; padding: 0 12px; border-radius: 7px; cursor: pointer;
+  background: transparent; border: 1px solid rgba(255, 255, 255, .55); color: #fff; font-size: 13px; font-weight: 700;
+}
+
+/* ---------------- マウスのある端末だけ：ホバーで端のつまみを見せる ---------------- */
+@media (hover: hover) {
+  .gantt .g-bar.g-grab:hover .g-h::after { opacity: .7; }
+}
+
+/* ---------------- タッチ端末（指で触る） ---------------- */
+@media (hover: none) {
+  /* 触ったあとに色が残らないよう、ホバーの色を付けない */
+  table.tbl tbody tr:hover, .tree-row:not(.head):hover, .gantt .g-row:hover, .tpl-list button:hover, .icon-btn:hover { background: inherit; }
+  .gantt .g-row:hover .g-label { background: var(--surface); }
+  .gantt .g-row.g-group:hover .g-label, .gantt .g-row.g-group:hover { background: var(--surface-2); }
+  .btn:hover { background: var(--surface); }
+  .btn.primary:hover { background: var(--accent); }
+  .tcard:hover { border-color: var(--border); }
+  .tree-row .add-sub { opacity: 1; }
+}
+@media (pointer: coarse) {
+  /* 指で押しやすい大きさ（44px 前後）にする */
+  .btn.sm { height: 40px; }
+  .icon-btn { width: 44px; height: 44px; }
+  select.inline, input.inline { height: 40px; }
+  .tabs a, .tabs button { min-height: 44px; }
+  /* iPhone は 16px 未満の入力欄に触ると画面を拡大してしまう */
+  input[type="text"], input[type="number"], input[type="date"], input[type="search"], select, textarea { font-size: 16px; }
+  /* ガントのバーを太くして、つかみやすくする */
+  .gantt .g-track { height: 34px; }
+  .gantt .g-bar { top: 5px; height: 24px; }
+  .gantt .g-bar .g-pct { font-size: 12px; }
+}
+/* 小窓：画面の高さはブラウザのツールバーの出入りに追従させる。スマホでは下から出す */
+.modal { max-height: calc(100dvh - 32px); }
+@media (max-width: 560px) {
+  .modal {
+    left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%;
+    max-height: 92vh; max-height: 92dvh; border-radius: 16px 16px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 /* ---- スマホ ---- */
 @media (max-width: 900px) {
   .topbar { gap: 8px; padding: 0 12px; }
@@ -363,6 +436,11 @@ textarea { resize: vertical; min-height: 72px; }
   .fe-typename { padding-left: 0; }
   .fe-dl { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
   .fe-dl dd { margin-bottom: 10px; }
+  /* iPhone の画面下（ホームバー）や切り欠きに重ならないようにする */
+  .sidebar { padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+  .main { padding-bottom: calc(92px + env(safe-area-inset-bottom)); }
+  /* お知らせ（トースト）は下部タブバーの上に出す */
+  .toast { left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); max-width: none; }
 }
 .sidebar a .short { display: none; }
 </style>

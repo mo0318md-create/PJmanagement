@@ -96,13 +96,18 @@
   }
 
   var toastTimer = null;
-  function toast(msg, isErr) {
+  /** action: { label, fn } を渡すと、文のあとにボタンを出す（元に戻す など） */
+  function toast(msg, isErr, action) {
     var t = $('toast');
-    t.textContent = msg;
+    t.innerHTML = '<span>' + esc(msg) + '</span>' +
+      (action ? '<button type="button" class="toast-act">' + esc(action.label) + '</button>' : '');
     t.className = 'toast' + (isErr ? ' err' : '');
     t.hidden = false;
+    if (action) {
+      t.querySelector('.toast-act').onclick = function () { t.hidden = true; clearTimeout(toastTimer); action.fn(); };
+    }
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, isErr ? 6000 : 2600);
+    toastTimer = setTimeout(function () { t.hidden = true; }, isErr ? 6000 : (action ? 6000 : 2600));
   }
 
   // ---------------------------------------------------------------- ナビ
@@ -384,8 +389,9 @@
     });
     if (today < min) min = today;
     if (today > max) max = today;
+    // 右側は少し広めに取る（バーを後ろへずらす余地を残す）
     min = H.addDays(min, -3);
-    max = H.addDays(max, 3);
+    max = H.addDays(max, 10);
 
     var axis = ganttAxis(min, max, today, opt.scale);
     var lines = ganttGridLines(axis);
@@ -414,7 +420,8 @@
 
       if (r.kind === 'group' || r.kind === 'sub') {
         var span = (r.startDate && r.endDate)
-          ? '<div class="g-span ' + (c.health || '') + '" style="left:' + axis.pos(r.startDate).toFixed(2) + '%;width:' + widthOf(r.startDate, r.endDate).toFixed(2) + '%"' +
+          ? '<div class="g-span ' + (c.health || '') + (r.dragProject ? ' g-grab' : '') + '" style="left:' + axis.pos(r.startDate).toFixed(2) + '%;width:' + widthOf(r.startDate, r.endDate).toFixed(2) + '%"' +
+            (r.dragProject ? ' data-gbar="project:' + esc(r.dragProject) + '" data-s="' + esc(r.startDate) + '" data-e="' + esc(r.endDate) + '"' : '') +
             ' title="' + esc(H.formatDate(r.startDate) + ' 〜 ' + H.formatDate(r.endDate)) + '"></div>' : '';
         return '<div class="g-row g-' + r.kind + '"' + (r.attrs || '') + '>' +
           '<div class="g-label"><div class="g-name">' +
@@ -437,15 +444,18 @@
 
       var width = Math.max(0.6, ((H.diffDays(r.startDate, r.endDate) + 1) / axis.span) * 100);
       var done = Math.round((c.actualRate || 0) * 100);
-      var bar = '<div class="g-bar ' + (c.health || 'not_started') + '" style="left:' + axis.pos(r.startDate).toFixed(2) + '%;width:' + width.toFixed(2) + '%"' +
+      var canDrag = !!r.href;   // タスクの行だけ。まとめ行は動かさない
+      var bar = '<div class="g-bar ' + (c.health || 'not_started') + (canDrag ? ' g-grab' : '') + '" style="left:' + axis.pos(r.startDate).toFixed(2) + '%;width:' + width.toFixed(2) + '%"' +
+        (canDrag ? ' data-gbar="item:' + esc(r.href) + '" data-edit="' + esc(r.href) + '" data-s="' + esc(r.startDate) + '" data-e="' + esc(r.endDate) + '"' : '') +
         ' title="' + esc(H.formatDate(r.startDate) + ' 〜 ' + H.formatDate(r.endDate) + '（進捗 ' + done + '%）') + '">' +
+        (canDrag ? '<span class="g-h l" aria-hidden="true"></span><span class="g-h r" aria-hidden="true"></span>' : '') +
         '<span class="g-rest" style="width:' + (100 - done) + '%"></span>' +
         (width > 6 ? '<span class="g-pct">' + done + '%</span>' : '') + '</div>';
 
       return '<div class="g-row lv' + (r.level || 1) + '">' + label + '<div class="g-track">' + lines + bar + todayLine + '</div></div>';
     }).join('');
 
-    return '<div class="gantt-scroll"><div class="gantt">' + head + '<div class="g-rows">' + body + '</div></div></div>';
+    return '<div class="gantt-scroll"><div class="gantt" data-min="' + esc(min) + '" data-span="' + axis.span + '">' + head + '<div class="g-rows">' + body + '</div></div></div>';
   }
 
   function ganttLegend() {
@@ -454,7 +464,8 @@
       '<span><i style="background:var(--h-on-track);opacity:.28"></i>薄い部分＝残り</span>' +
       '<span><i style="width:2px;background:var(--today-line)"></i>今日</span>' +
       '<span>目盛りの数字＝その線の日付（週表示は月曜、月表示は1日）</span>' +
-      '<span>バーの色＝状態（緑 対応中／赤 遅延／青 完了／灰 開始前）</span></div>';
+      '<span>バーの色＝状態（緑 対応中／赤 遅延／青 完了／灰 開始前）</span>' +
+      '<span class="gantt-howto">バーを左右に動かす＝日程をずらす・端を動かす＝開始日／終了日を変える（タッチは長押ししてから）</span></div>';
   }
 
   // ---- ① プロジェクト一覧 ----
@@ -562,7 +573,7 @@
       var open = !!S.portfolioOpen[p.project_id];
       rows.push({
         kind: 'group', name: p.key + ' ' + p.name, open: open,
-        startDate: p.start_date, endDate: p.end_date, calc: c,
+        startDate: p.start_date, endDate: p.end_date, calc: c, dragProject: p.project_id,
         attrs: ' data-pgtoggle="' + esc(p.project_id) + '"',
         badgeHtml: ' ' + badge(c.health) + (c.delayedInside > 0 ? ' <span class="late">配下 ' + c.delayedInside + '</span>' : ''),
         metaHtml: periodText(p.start_date, p.end_date) + ' ・ 進捗 ' + H.pct(c.actualRate) +
@@ -678,7 +689,7 @@
           .map(function (k) { return { node: k, calc: H.evaluate(k, [], S.today) }; });
         var calc = H.evaluate(x, kidsCalc, S.today);
         var parent = x.parent_item_id ? itemById(x.parent_item_id) : null;
-        return '<div class="tcard" draggable="true" data-drag="' + esc(x.item_id) + '" data-edit="' + esc(x.item_id) + '">' +
+        return '<div class="tcard" data-drag="' + esc(x.item_id) + '" data-edit="' + esc(x.item_id) + '">' +
           '<div class="top">' + typeChip(x.item_type) +
             '<span class="faint" style="font-size:12px">' + esc(x.item_key) + '</span>' +
             '<span class="spacer"></span>' + badge(calc.health) + '</div>' +
@@ -700,7 +711,7 @@
         '</select>' +
         '<span class="spacer"></span><span class="count">タスク ' + filtered.length + ' 件</span>' +
       '</div>' +
-      '<p class="help" style="margin:0 0 10px">カードをドラッグすると、ステータスが変わります</p>' +
+      '<p class="help" style="margin:0 0 10px">カードを別の列へ動かすとステータスが変わります（タッチは長押ししてから）</p>' +
       '<div class="board-wrap"><div class="board">' + cols + '</div></div>';
   }
 
@@ -1240,7 +1251,6 @@
     // ④ ボード：担当者の絞り込み、カードのドラッグでステータス変更
     var bda = $('bd-assignee');
     if (bda) bda.addEventListener('change', function () { S.boardAssignee = this.value; render(); });
-    wireBoardDrag();
 
     // ⑤ リスト：まとめ方
     var lsg = $('ls-group');
@@ -1307,66 +1317,382 @@
     });
   }
 
-  /**
-   * ④ ボードのドラッグ＆ドロップ。カードを別の列に落とすとステータスを変える。
-   * ドラッグできない環境（一部のタブレット等）向けに、カードをダブルクリックしても編集が開く
-   * （data-edit は共通のクリック委譲ですでに効く）。
-   */
-  var boardDragId = null;
-  function wireBoardDrag() {
-    document.querySelectorAll('[data-drag]').forEach(function (el) {
-      el.addEventListener('dragstart', function (e) {
-        boardDragId = this.getAttribute('data-drag');
-        this.classList.add('dragging');
-        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', boardDragId); }
-      });
-      el.addEventListener('dragend', function () { this.classList.remove('dragging'); });
-    });
-    document.querySelectorAll('[data-dropcol]').forEach(function (col) {
-      col.addEventListener('dragover', function (e) { e.preventDefault(); this.classList.add('over'); });
-      col.addEventListener('dragleave', function () { this.classList.remove('over'); });
-      col.addEventListener('drop', function (e) {
-        e.preventDefault();
-        this.classList.remove('over');
-        var id = boardDragId || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
-        if (!id) return;
-        var status = this.getAttribute('data-dropcol');
-        var it = itemById(id);
-        if (!it || it.status === status) return;
-        quickSave(id, { status: status });
-      });
+  /* ================================================================
+   * ドラッグ（マウス・ペン・タッチ共通）
+   *   マウス・ペン … 押したまま動かすと始まる
+   *   タッチ       … 長押ししてから動かす。すぐ指を動かしたときは画面のスクロールとして扱う
+   * 使う側は dragOn(選択子, { start, move, end, cancel, scroller }) で登録する。
+   *   start(pt, el, pointerType) … 始めてよければ true を返す
+   *   move(pt) / end(pt) / cancel()
+   *   scroller(el) … 端に寄せたときに自動で横スクロールする入れ物（無ければ null）
+   * ================================================================ */
+  var DRAG_LONG_PRESS_MS = 350;
+  var DRAG_SLOP_PX = 6;
+  var dragDefs = [];
+  var dg = null;            // 進行中のドラッグ { def, el, sx, sy, x, y, started, type, timer, scroller, raf }
+  var dragClickBlockUntil = 0;
+
+  function dragOn(selector, def) { def.selector = selector; dragDefs.push(def); }
+
+  function dragFind(target) {
+    for (var i = 0; i < dragDefs.length; i++) {
+      var el = target.closest && target.closest(dragDefs[i].selector);
+      if (el) return { def: dragDefs[i], el: el };
+    }
+    return null;
+  }
+
+  function dragBegin() {
+    // 起点は「押した位置」。つかんだ場所（端か中ほどか）と、動かした量の基準になる
+    var ok = dg.def.start({ x: dg.sx, y: dg.sy }, dg.el, dg.type);
+    if (!ok) { dg = null; return false; }
+    dg.started = true;
+    dg.scroller = dg.def.scroller ? dg.def.scroller(dg.el) : null;
+    document.body.classList.add('is-dragging');
+    if (dg.type === 'touch' && navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+    dragAutoScroll();
+    return true;
+  }
+
+  function dragMove(x, y) {
+    dg.x = x; dg.y = y;
+    dg.def.move({ x: x, y: y });
+  }
+
+  function dragFinish(cancelled) {
+    var d = dg;
+    dg = null;
+    if (!d) return;
+    clearTimeout(d.timer);
+    if (d.raf) cancelAnimationFrame(d.raf);
+    document.body.classList.remove('is-dragging');
+    if (!d.started) return;
+    // 離した直後にブラウザが出すクリック（編集が開く等）だけを無視する。
+    // マウスは pointerup の直後に続けて出るので短い時間で足りる（長くすると次の操作まで消してしまう）
+    dragClickBlockUntil = Date.now() + 50;
+    if (cancelled) d.def.cancel(); else d.def.end({ x: d.x, y: d.y });
+  }
+
+  /** 入れ物の端や画面の上下に寄せている間、そちらへ少しずつスクロールする */
+  function dragAutoScroll() {
+    if (!dg || !dg.started) return;
+    var EDGE = 36, STEP = 12, moved = false;
+    var sc = dg.scroller;
+    if (sc) {
+      var r = sc.getBoundingClientRect();
+      if (dg.x < r.left + EDGE && sc.scrollLeft > 0) { sc.scrollLeft -= STEP; moved = true; }
+      else if (dg.x > r.right - EDGE && sc.scrollLeft + sc.clientWidth < sc.scrollWidth) { sc.scrollLeft += STEP; moved = true; }
+    }
+    var bottomBar = window.innerWidth <= 900 ? 72 : 0;
+    if (dg.y < EDGE + 60) { window.scrollBy(0, -STEP); moved = true; }
+    else if (dg.y > window.innerHeight - EDGE - bottomBar) { window.scrollBy(0, STEP); moved = true; }
+    if (moved) dg.def.move({ x: dg.x, y: dg.y });
+    dg.raf = requestAnimationFrame(dragAutoScroll);
+  }
+
+  // ---- マウス・ペン（Pointer Events）----
+  document.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'touch' || e.button !== 0 || dg) return;
+    var f = dragFind(e.target);
+    if (!f) return;
+    dg = { def: f.def, el: f.el, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, started: false, type: e.pointerType };
+  });
+  document.addEventListener('pointermove', function (e) {
+    if (!dg || dg.type === 'touch') return;
+    if (!dg.started) {
+      if (Math.abs(e.clientX - dg.sx) + Math.abs(e.clientY - dg.sy) < DRAG_SLOP_PX) return;
+      dg.x = e.clientX; dg.y = e.clientY;
+      if (!dragBegin()) return;
+    }
+    e.preventDefault();
+    dragMove(e.clientX, e.clientY);
+  });
+  document.addEventListener('pointerup', function (e) {
+    if (!dg || dg.type === 'touch') return;
+    if (dg.started) { dg.x = e.clientX; dg.y = e.clientY; }
+    dragFinish(false);
+  });
+  document.addEventListener('pointercancel', function (e) {
+    if (dg && dg.type !== 'touch') dragFinish(true);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && dg && dg.started) dragFinish(true);
+  });
+
+  // ---- タッチ（長押しで開始）----
+  document.addEventListener('touchstart', function (e) {
+    if (dg || e.touches.length !== 1) { if (dg && !dg.started) dragFinish(true); return; }
+    var f = dragFind(e.target);
+    if (!f) return;
+    var t = e.touches[0];
+    dg = { def: f.def, el: f.el, sx: t.clientX, sy: t.clientY, x: t.clientX, y: t.clientY, started: false, type: 'touch' };
+    f.el.classList.add('press');
+    dg.timer = setTimeout(function () {
+      if (dg && !dg.started) { dg.el.classList.remove('press'); dragBegin(); }
+    }, DRAG_LONG_PRESS_MS);
+  }, { passive: true });
+  document.addEventListener('touchmove', function (e) {
+    if (!dg || dg.type !== 'touch') return;
+    var t = e.touches[0];
+    if (!dg.started) {
+      // 長押しの前に指が動いた＝スクロール。ドラッグにはしない
+      if (Math.abs(t.clientX - dg.sx) + Math.abs(t.clientY - dg.sy) > DRAG_SLOP_PX * 2) {
+        dg.el.classList.remove('press');
+        clearTimeout(dg.timer); dg = null;
+      }
+      return;
+    }
+    e.preventDefault();   // ドラッグ中は画面をスクロールさせない
+    dragMove(t.clientX, t.clientY);
+  }, { passive: false });
+  document.addEventListener('touchend', function (e) {
+    if (!dg || dg.type !== 'touch') return;
+    dg.el.classList.remove('press');
+    if (dg.started) e.preventDefault();   // 離したときのタップ（編集が開く等）を起こさない
+    dragFinish(false);
+  }, { passive: false });
+  document.addEventListener('touchcancel', function () {
+    if (dg && dg.type === 'touch') { dg.el.classList.remove('press'); dragFinish(true); }
+  });
+
+  // 長押しで出るメニューやブラウザ標準のドラッグと取り合わないようにする
+  document.addEventListener('contextmenu', function (e) {
+    if (dg && dg.type === 'touch') e.preventDefault();
+  });
+  document.addEventListener('dragstart', function (e) { if (dragFind(e.target)) e.preventDefault(); });
+  document.addEventListener('click', function (e) {
+    if (Date.now() < dragClickBlockUntil && !(e.target.closest && e.target.closest('#toast'))) {
+      e.stopImmediatePropagation(); e.stopPropagation(); e.preventDefault();
+    }
+  }, true);
+
+  /* ================================================================
+   * ガントのバーで日程を変える
+   *   バーの中ほどを動かす … 開始日と終了日を同じ日数だけずらす
+   *   左端／右端を動かす   … 開始日／終了日だけを変える（期間は1日より短くならない）
+   * 対象はタスクのバー（②⑥⑫⑬）と、②のプロジェクトの帯。離したときに保存し、「元に戻す」で取り消せる。
+   * ================================================================ */
+  var gd = null;   // { bar, kind, id, mode, s0, e0, s, e, min, span, dayPx }
+
+  function gdTip(show) {
+    var tip = $('gtip');
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.id = 'gtip'; tip.className = 'gtip'; tip.setAttribute('role', 'status');
+      document.body.appendChild(tip);
+    }
+    tip.hidden = !show;
+    return tip;
+  }
+
+  function gdPaint(pt) {
+    var pct = function (iso) { return (H.diffDays(gd.min, iso) / gd.span) * 100; };
+    gd.bar.style.left = pct(gd.s).toFixed(3) + '%';
+    gd.bar.style.width = Math.max(0.6, ((H.diffDays(gd.s, gd.e) + 1) / gd.span) * 100).toFixed(3) + '%';
+    var dS = H.diffDays(gd.s0, gd.s), dE = H.diffDays(gd.e0, gd.e);
+    var sign = function (n) { return (n > 0 ? '+' : '') + n + '日'; };
+    var what = gd.mode === 'move' ? (dS ? '全体を ' + sign(dS) : '動かしていません')
+      : gd.mode === 'start' ? (dS ? '開始日を ' + sign(dS) : '開始日そのまま')
+      : (dE ? '終了日を ' + sign(dE) : '終了日そのまま');
+    var tip = gdTip(true);
+    tip.innerHTML = '<b>' + esc(H.formatDate(gd.s)) + ' 〜 ' + esc(H.formatDate(gd.e)) + '</b>' +
+      '<span>' + H.durationDays(gd.s, gd.e) + '日間 ・ ' + esc(what) + '</span>';
+    var up = gd.type === 'touch' ? 76 : 44;
+    var x = Math.min(Math.max(pt.x, 110), window.innerWidth - 110);
+    tip.style.left = x + 'px';
+    tip.style.top = Math.max(pt.y - up, 8) + 'px';
+  }
+
+  dragOn('[data-gbar]', {
+    scroller: function (el) { return el.closest('.gantt-scroll'); },
+    start: function (pt, bar, type) {
+      var g = bar.closest('.gantt');
+      var track = bar.parentElement;
+      var parts = bar.getAttribute('data-gbar').split(':');
+      var span = Number(g.getAttribute('data-span'));
+      var r = bar.getBoundingClientRect();
+      // どこをつかんだかで「ずらす／開始日／終了日」を決める。タッチは指が太いので端の幅を広く取る
+      var edge = Math.min(type === 'touch' ? 18 : 8, r.width / 3);
+      var mode = pt.x <= r.left + edge ? 'start' : (pt.x >= r.right - edge ? 'end' : 'move');
+      var s = bar.getAttribute('data-s'), e = bar.getAttribute('data-e');
+      var sc = bar.closest('.gantt-scroll');
+      gd = { bar: bar, kind: parts[0], id: parts.slice(1).join(':'), mode: mode, type: type,
+             s0: s, e0: e, s: s, e: e, x0: pt.x, min: g.getAttribute('data-min'), span: span,
+             dayPx: track.clientWidth / span, sc: sc, scroll0: sc ? sc.scrollLeft : 0 };
+      bar.classList.add('dragging', 'mode-' + mode);
+      gdPaint(pt);
+      return true;
+    },
+    move: function (pt) {
+      // 自動スクロールしたぶんも足す（バーの位置は中身の座標、指の位置は画面の座標のため）
+      var dx = pt.x - gd.x0 + (gd.sc ? gd.sc.scrollLeft - gd.scroll0 : 0);
+      var d = Math.round(dx / gd.dayPx);
+      if (gd.mode === 'move') { gd.s = H.addDays(gd.s0, d); gd.e = H.addDays(gd.e0, d); }
+      else if (gd.mode === 'start') { gd.s = H.addDays(gd.s0, d); if (gd.s > gd.e0) gd.s = gd.e0; gd.e = gd.e0; }
+      else { gd.e = H.addDays(gd.e0, d); if (gd.e < gd.s0) gd.e = gd.s0; gd.s = gd.s0; }
+      gdPaint(pt);
+    },
+    end: function () {
+      var d = gd; gd = null;
+      gdTip(false);
+      d.bar.classList.remove('dragging', 'mode-' + d.mode);
+      if (d.s === d.s0 && d.e === d.e0) { render(); return; }
+      if (d.kind === 'item') {
+        quickSave(d.id, { start_date: d.s, end_date: d.e }, {
+          msg: '日程を ' + H.formatDate(d.s) + ' 〜 ' + H.formatDate(d.e) + ' にしました',
+          undo: { start_date: d.s0, end_date: d.e0 }
+        });
+      } else {
+        saveProjectDates(d.id, d.s, d.e, d.s0, d.e0);
+      }
+    },
+    cancel: function () {
+      var d = gd; gd = null;
+      gdTip(false);
+      if (d) d.bar.classList.remove('dragging', 'mode-' + d.mode);
+      render();
+    }
+  });
+
+  /** プロジェクトの期間だけを変えて保存する（②の帯のドラッグ）。ほかの設定は今の値のまま送る */
+  function saveProjectDates(pid, s, e, s0, e0, isUndo) {
+    var p = project(pid);
+    if (!p) return;
+    p.start_date = s; p.end_date = e;
+    render();
+    runServer('saveProject', {
+      project_id: p.project_id, updated_at: p.updated_at,
+      name: p.name, description: p.description || '', key: p.key,
+      owner_user_id: p.owner_user_id, status: p.status,
+      start_date: s, end_date: e,
+      field_defs: p.field_defs, custom_fields: p.custom_fields
+    }).then(function (r) {
+      p.updated_at = r.updated_at;
+      if (r.field_defs) p.field_defs = r.field_defs;
+      if (r.custom_fields) p.custom_fields = r.custom_fields;
+      toast(isUndo ? '元に戻しました' : '「' + p.name + '」の期間を ' + H.formatDate(s) + ' 〜 ' + H.formatDate(e) + ' にしました', false,
+        isUndo ? null : { label: '元に戻す', fn: function () { saveProjectDates(pid, s0, e0, s, e, true); } });
+      refreshSummarySoon();
+    }).catch(function (err) {
+      p.start_date = s0; p.end_date = e0;
+      render();
+      fail(err);
     });
   }
 
+  /* ================================================================
+   * ④ ボード：カードを別の列へ動かすとステータスが変わる（F-3-15）
+   * マウスは押して動かす、タッチは長押ししてから動かす。カードをタップ／クリックすると編集が開く。
+   * ================================================================ */
+  var bd = null;   // { card, id, ghost, dx, dy, col }
+
+  dragOn('[data-drag]', {
+    scroller: function (el) { return el.closest('.board-wrap'); },
+    start: function (pt, card) {
+      var r = card.getBoundingClientRect();
+      var ghost = card.cloneNode(true);
+      ghost.removeAttribute('data-drag'); ghost.removeAttribute('data-edit');
+      ghost.className = 'tcard tcard-ghost';
+      ghost.style.width = r.width + 'px';
+      document.body.appendChild(ghost);
+      bd = { card: card, id: card.getAttribute('data-drag'), ghost: ghost, dx: pt.x - r.left, dy: pt.y - r.top, col: null };
+      card.classList.add('dragging');
+      this.move(pt);
+      return true;
+    },
+    move: function (pt) {
+      bd.ghost.style.transform = 'translate(' + (pt.x - bd.dx) + 'px,' + (pt.y - bd.dy) + 'px) rotate(1.5deg)';
+      var under = document.elementFromPoint(pt.x, pt.y);
+      var col = under && under.closest ? under.closest('[data-dropcol]') : null;
+      if (col !== bd.col) {
+        if (bd.col) bd.col.classList.remove('over');
+        if (col) col.classList.add('over');
+        bd.col = col;
+      }
+    },
+    end: function () {
+      var b = bd; bd = null;
+      b.ghost.remove();
+      b.card.classList.remove('dragging');
+      if (b.col) b.col.classList.remove('over');
+      var it = itemById(b.id);
+      if (!b.col || !it) return;
+      var status = b.col.getAttribute('data-dropcol');
+      if (it.status === status) return;
+      quickSave(b.id, { status: status }, {
+        msg: '「' + it.name + '」を ' + H.STATUS_LABEL[status] + ' にしました',
+        undo: { status: it.status, progress_rate: it.progress_rate }
+      });
+    },
+    cancel: function () {
+      var b = bd; bd = null;
+      if (!b) return;
+      b.ghost.remove();
+      b.card.classList.remove('dragging');
+      if (b.col) b.col.classList.remove('over');
+    }
+  });
+
+  /** google.script.run を Promise で使う */
+  function runServer(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+      r[fn].apply(r, args);
+    });
+  }
+
+  /** 保存のあと、一覧の集計（状態・進捗）を少し遅らせて1回だけ取り直す */
+  var summaryTimer = null;
+  function refreshSummarySoon() {
+    clearTimeout(summaryTimer);
+    summaryTimer = setTimeout(function () {
+      runServer('getBootstrap').then(function (d) {
+        d.summary.forEach(function (x) { S.summary[x.project_id] = x; });
+        if (S.view === 'projects') render();
+      }).catch(function () {});
+    }, 800);
+  }
+
   /**
-   * 一覧の行から、ステータスや進捗率だけを変えて保存する（F-4-4）。
-   * 画面遷移なし。担当者が現場のスマホから触る前提。
+   * タスクの一部（ステータス・進捗率・開始日・終了日）だけを変えて保存する（F-4-4、ボード、ガント）。
+   * 画面は先に変えて、保存は裏で行う。同じタスクへの保存は順番に送る（更新日時の食い違いを防ぐ）。
+   * 失敗したら、サーバーの内容を読み直して画面を正しい状態に戻す。
+   * opts: { msg: 保存後に出す文, undo: 取り消すときに戻す値 }
    */
-  function quickSave(itemId, patch) {
+  var saveChains = {}, saveSeq = {};
+  function quickSave(itemId, patch, opts) {
+    opts = opts || {};
     var it = itemById(itemId);
     if (!it) return;
-    var payload = {
-      item_id: it.item_id, updated_at: it.updated_at,
-      name: it.name, description: it.description || '',
-      item_type: it.item_type, assignee_user_id: it.assignee_user_id,
-      status: patch.status !== undefined ? patch.status : it.status,
-      start_date: it.start_date, end_date: it.end_date,
-      progress_rate: patch.progress_rate !== undefined ? patch.progress_rate : it.progress_rate
-    };
-    google.script.run
-      .withSuccessHandler(function (r) {
-        // 画面の見た目を合わせる（全件の読み直しはしない）
-        it.status = payload.status;
-        it.progress_rate = payload.status === 'done' ? 100 : payload.progress_rate;
+    ['status', 'progress_rate', 'start_date', 'end_date'].forEach(function (k) {
+      if (patch[k] !== undefined) it[k] = patch[k];
+    });
+    if (it.status === 'done') it.progress_rate = 100;
+    render();
+
+    var mySeq = saveSeq[itemId] = (saveSeq[itemId] || 0) + 1;
+    saveChains[itemId] = (saveChains[itemId] || Promise.resolve()).then(function () {
+      // あとから同じタスクの保存が積まれていれば、そちらが最新の内容を送るので、ここは送らない
+      if (mySeq !== saveSeq[itemId]) return;
+      return runServer('saveItem', {
+        item_id: it.item_id, updated_at: it.updated_at,
+        name: it.name, description: it.description || '',
+        item_type: it.item_type, assignee_user_id: it.assignee_user_id,
+        status: it.status, start_date: it.start_date, end_date: it.end_date,
+        progress_rate: it.progress_rate
+      }).then(function (r) {
         it.updated_at = r.updated_at;
-        toast('保存しました');
-        render();
-        google.script.run.withSuccessHandler(function (d) {
-          d.summary.forEach(function (x) { S.summary[x.project_id] = x; });
-        }).getBootstrap();
-      })
-      .withFailureHandler(function (err) { fail(err); render(); })
-      .saveItem(payload);
+        toast(opts.msg || '保存しました', false, opts.undo ? {
+          label: '元に戻す',
+          fn: function () { quickSave(itemId, opts.undo, { msg: '元に戻しました' }); }
+        } : null);
+        refreshSummarySoon();
+      });
+    }).catch(function (err) {
+      fail(err);
+      loadItems();
+    });
   }
 
   /* ============ 設定項目（1行 = 項目名・型・値） ============

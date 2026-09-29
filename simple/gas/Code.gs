@@ -39,7 +39,7 @@ function doGet(e) {
   return t.evaluate()
     .setTitle('PJ管理')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
 /** index.html から <?!= include('css') ?> のように差し込む */
