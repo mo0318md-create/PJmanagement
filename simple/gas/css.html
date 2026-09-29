@@ -260,13 +260,13 @@ textarea { resize: vertical; min-height: 72px; }
 .kbtn.add:hover { background: var(--accent-soft); }
 .kbtn .late { font-weight: 500; }
 @media (pointer: coarse) { .kbtn { height: 38px; font-size: 13px; padding: 0 14px 0 10px; } }
-.row.kid { position: relative; background: color-mix(in srgb, var(--sunken) 55%, var(--surface)); border-top-color: var(--line2); }
-.row.par + .row.kid { border-top-style: dashed; }
-.row.kid::before, .row.kid::after { content: ''; position: absolute; left: 26px; background: var(--ink3); opacity: .55; }
-.row.kid::before { top: 0; bottom: 0; width: 2px; }
-.row.kid.last::before { bottom: auto; height: 23px; }
-.row.kid::after { top: 21px; width: 11px; height: 2px; }
-.row.kid .r-name.lv2 { padding-left: 26px; }
+.row.kid { position: relative; background: color-mix(in srgb, var(--accent-soft) 35%, var(--surface)); }
+.row.kid + .row.kid { border-top-color: color-mix(in srgb, var(--accent) 10%, var(--line2)); }
+.row.kid::before { content: ''; position: absolute; left: 22px; top: 0; bottom: 0; width: 3px; background: color-mix(in srgb, var(--accent) 45%, transparent); z-index: 1; }
+.row.par + .row.kid::before { top: 10px; border-radius: 3px 3px 0 0; }
+.row.kid.last::before { bottom: 10px; border-radius: 0 0 3px 3px; }
+.row.par + .row.kid.last::before { border-radius: 3px; }
+.row.kid .r-name.lv2 { padding-left: 22px; }
 @container rows (max-width: 880px) {
   .row { grid-template-columns: minmax(0, 1fr) 100px 150px 92px; }
   .row > .r-who, .row > .r-upd { display: none; }
@@ -282,10 +282,8 @@ textarea { resize: vertical; min-height: 72px; }
   .r-name .t { flex-wrap: wrap; row-gap: 3px; }
   .r-name .t .nm { white-space: normal; overflow: visible; }
   .r-name.lv2 { padding-left: 14px; }
-  .row.kid::before, .row.kid::after { left: 22px; }
-  .row.kid::after { top: 23px; }
-  .row.kid.last::before { height: 25px; }
-  .row.kid .r-name.lv2 { padding-left: 22px; }
+  .row.kid::before { left: 18px; }
+  .row.kid .r-name.lv2 { padding-left: 18px; }
   .row > .r-acts { grid-area: acts; margin-top: 0; }
   .row.proj .r-sub { display: none; }
   .row:has(> .r-acts) { grid-template-areas: "name st" "prog due" "acts acts"; }
