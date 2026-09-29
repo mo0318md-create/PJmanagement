@@ -571,12 +571,14 @@
     return '<div class="row' + (o.cls ? ' ' + o.cls : '') + '"' + (o.attrs || '') + '>' +
       '<div class="r-name' + (o.lv2 ? ' lv2' : '') + '"><div class="t">' + o.name + '</div>' +
         (o.sub ? '<div class="r-sub">' + o.sub + '</div>' : '') +
-        (o.sub2 ? '<div class="r-sub2">' + o.sub2 + '</div>' : '') + '</div>' +
+        (o.sub2 ? '<div class="r-sub2">' + o.sub2 + '</div>' : '') +
+'</div>' +
       '<div class="r-st">' + o.st + '</div>' +
       '<div class="r-prog">' + o.prog + '</div>' +
       '<div class="r-due">' + o.due + '</div>' +
       '<div class="r-who">' + (o.who || '') + '</div>' +
-      '<div class="r-upd">' + (o.upd || '') + '</div></div>';
+      '<div class="r-upd">' + (o.upd || '') + '</div>' +
+      (o.acts ? '<div class="r-acts">' + o.acts + '</div>' : '') + '</div>';
   }
   function rowHead(first, whoLabel) {
     return '<div class="row head" aria-hidden="true"><span>' + first + '</span><span>状態</span><span>進捗（｜は予定）</span><span>期限</span>' +
@@ -588,13 +590,13 @@
     var parent = n.parent_item_id ? itemById(n.parent_item_id) : null;
     var lv2 = Number(n.level) === 2 && !opts.flat;
     return row({
-      lv2: lv2,
+      lv2: lv2, cls: opts.cls, acts: opts.acts,
       name: (opts.toggle || '') + typeChip(n.item_type) +
         '<a class="nm" data-edit="' + esc(n.item_id) + '">' + (opts.nameHtml || esc(n.name)) + '</a>' + (opts.extra || ''),
       sub: '<span class="k">' + esc(n.item_key) + '</span>' + (opts.pj ? ' ・ ' + esc(opts.pj) : '') +
         (parent && (opts.flat || opts.pj) ? ' ・ └ ' + esc(parent.name) : '') +
         (n.start_date && n.end_date ? ' ・ <span class="mono">' + shortRange(n.start_date, n.end_date) + '</span>' : ''),
-      sub2: esc(userName(n.assignee_user_id) || '未アサイン') + ' ・ 最終更新 ' + esc(stampText(n.updated_at, n.updated_by_name)),
+      sub2: esc(userName(n.assignee_user_id) || '未アサイン') + (n.updated_at ? ' ・ ' + esc(shortStamp(n.updated_at, n.updated_by_name)) : ''),
       st: badge(calc.health), prog: progBar(calc), due: dueText(calc),
       who: assignee(n.assignee_user_id), upd: updHtml(n.updated_at, n.updated_by_name)
     });
@@ -608,6 +610,11 @@
     if (!m) return iso ? String(iso) : '';
     var w = '日月火水木金土'.charAt(new Date(+m[1], +m[2] - 1, +m[3]).getDay());
     return (m[1] !== String(S.today).slice(0, 4) ? m[1] + '/' : '') + (+m[2]) + '/' + (+m[3]) + '(' + w + ') ' + m[4] + ':' + m[5];
+  }
+  function shortStamp(iso, name) {
+    var m = String(iso || '').match(/^\d{4}-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (!m) return '';
+    return '更新 ' + (+m[1]) + '/' + (+m[2]) + ' ' + m[3] + ':' + m[4] + (name ? ' ' + name : '');
   }
   function stampText(iso, name) {
     if (!iso) return '記録なし';
@@ -938,15 +945,15 @@
       var calc = projCalc(p);
       var la = latestActivity(p);
       return row({
-        cls: 'click', attrs: ' data-project="' + esc(p.project_id) + '"',
-        name: '<a class="nm" data-project="' + esc(p.project_id) + '">' + esc(p.name) + '</a>',
-        sub: '<span class="k">' + esc(p.key) + '</span> ・ ' + esc(p.template_name || 'テンプレートなし') +
-          (calc.delayed > 0 ? ' ・ <span class="late">配下の遅延 ' + calc.delayed + '</span>' : ''),
-        sub2: esc(userName(p.owner_user_id) || '—') + (la.at ? ' ・ 最終更新 ' + esc(stampText(la.at, la.name)) : ''),
+        cls: 'click proj', attrs: ' data-project="' + esc(p.project_id) + '"',
+        name: '<a class="nm" data-project="' + esc(p.project_id) + '">' + esc(p.name) + '</a>' +
+          (calc.delayed > 0 ? '<span class="lpill">遅延タスク ' + calc.delayed + '</span>' : ''),
+        sub: '<span class="k">' + esc(p.key) + '</span> ・ ' + esc(p.template_name || 'テンプレートなし'),
+        sub2: esc(userName(p.owner_user_id) || '—') + (la.at ? ' ・ ' + esc(shortStamp(la.at, la.name)) : ''),
         st: badge(calc.health), prog: progBar(calc),
         due: dueText(calc) + (p.end_date ? '<div class="faint mono" style="font-size:11.5px">〜' + md(p.end_date) + '</div>' : ''),
         who: assignee(p.owner_user_id),
-        upd: la.at ? updHtml(la.at, la.name) + (la.what ? '<div class="faint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(la.what) + '</div>' : '') : updHtml('', '')
+        upd: la.at ? '<span title="' + esc(la.what || 'プロジェクトの設定') + '">' + updHtml(la.at, la.name) + '</span>' : updHtml('', '')
       });
     }).join('');
 
@@ -1050,8 +1057,9 @@
     tree.children.forEach(function (t) {
       var kids = t.children.filter(function (s) { return !S.df.delayedOnly || s.calc.health === 'delayed'; });
       if (S.df.delayedOnly && t.calc.health !== 'delayed' && !kids.length) return;
-      rows += treeRow(t, 1, t.children.length > 0);
-      if (!S.collapsed[t.node.item_id]) kids.forEach(function (s) { rows += treeRow(s, 2, false); });
+      var open = !S.collapsed[t.node.item_id] && kids.length > 0;
+      rows += treeRow(t, 1, open ? 'par' : '');
+      if (open) kids.forEach(function (s, i) { rows += treeRow(s, 2, 'kid' + (i === kids.length - 1 ? ' last' : '')); });
     });
     var anyOpen = tree.children.some(function (t) { return !S.collapsed[t.node.item_id]; });
 
@@ -1096,15 +1104,18 @@
     render();
   }
 
-  function treeRow(n, level, hasKids) {
+  /** 木の1行。親は名前の下に「子タスク n件（開閉）」「子タスクを追加」のボタン、子は左の線で親につなぐ */
+  function treeRow(n, level, cls) {
     var node = n.node;
-    var toggle = level === 1
-      ? '<button type="button" class="toggle' + (hasKids ? '' : ' none') + '" data-toggle="' + esc(node.item_id) + '" aria-label="開閉" aria-expanded="' + !S.collapsed[node.item_id] + '">' +
-          ic(S.collapsed[node.item_id] ? 'right' : 'down', 14) + '</button>'
-      : '';
-    var extra = (n.calc.delayedInside > 0 ? '<span class="late" style="font-size:12px;white-space:nowrap">配下 ' + n.calc.delayedInside + '</span>' : '') +
-      (level === 1 ? '<a class="add-sub" data-addsub="' + esc(node.item_id) + '" title="このタスクの下に子タスクを作る">＋子タスク</a>' : '');
-    return taskRow(node, n.calc, { toggle: toggle, extra: extra });
+    var acts = '';
+    if (level === 1) {
+      var nk = n.children.length, closed = !!S.collapsed[node.item_id];
+      if (nk) acts += '<button type="button" class="kbtn" data-toggle="' + esc(node.item_id) + '" aria-expanded="' + !closed + '">' +
+        ic(closed ? 'right' : 'down', 14) + '子タスク ' + nk + '件' +
+        (n.calc.delayedInside > 0 ? '<span class="late">・遅延 ' + n.calc.delayedInside + '</span>' : '') + '</button>';
+      acts += '<button type="button" class="kbtn add" data-addsub="' + esc(node.item_id) + '">' + ic('plus', 14) + '子タスクを追加</button>';
+    }
+    return taskRow(node, n.calc, { cls: cls, acts: acts });
   }
 
   /** ④ ボード：PC・タブレットは4列（カードをつかんで動かす）、スマホは1列ずつ（「移動」で列を変える） */
@@ -2545,6 +2556,8 @@
         '<span class="mono faint" style="font-size:12px">' + esc(item.item_key || 'キーは自動') + '</span>') +
       '<div class="m-body">' +
         (isNew ? '' : stampLine(item)) +
+        (!isNew && item.parent_item_id && itemById(item.parent_item_id)
+          ? '<div class="fam-box"><span class="lbl">親タスク</span><a data-edit="' + esc(item.parent_item_id) + '">' + esc(itemById(item.parent_item_id).name) + '</a></div>' : '') +
         '<div class="field"><label for="t-name">タスク名</label><input id="t-name" type="text" value="' + esc(item.name) + '" placeholder="例：ワイヤーフレーム"></div>' +
         '<div class="field"><label>ステータス</label><div class="stbtn" role="radiogroup" aria-label="ステータス">' +
           H.STATUS_ORDER.map(function (s) {
@@ -2573,6 +2586,11 @@
           '<input type="hidden" id="t-rate" value="' + (hasKids ? '' : rate) + '">' +
           '<p class="help">' + (hasKids ? '<b>子タスクを持つので入力できません。</b>子 ' + kids.length + ' 件の平均になります' : '状態の判定には使いません。完了にすると100%になります') + '</p></div>' +
         '<div class="field"><label for="t-desc">説明</label><textarea id="t-desc">' + esc(item.description || '') + '</textarea></div>' +
+        (!isNew && Number(item.level) === 1
+          ? '<div class="field"><label>子タスク <span class="mono faint">' + kids.length + '件</span></label><div class="fam-list">' +
+              kids.map(function (k) { return '<a data-edit="' + esc(k.item_id) + '"><span class="fn">' + esc(k.name) + '</span>' + badge(H.evaluate(k, [], S.today).health) + '</a>'; }).join('') +
+              '<button type="button" class="kbtn add" data-addsub="' + esc(item.item_id) + '">' + ic('plus', 14) + '子タスクを追加</button></div></div>'
+          : '') +
       '</div>' +
       '<div class="m-foot">' +
         (isNew ? '' : '<button type="button" class="btn ghost danger" id="t-del">削除</button>') +
