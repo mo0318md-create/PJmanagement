@@ -23,7 +23,7 @@
     view: 'projects', projectId: null, tab: 'overview',
     collapsed: {}, unread: 0,
     // ① 一覧の絞り込み（F-3-3）と並び順（F-3-4）
-    pf: { health: '', owner: '', tpl: '', sort: 'delayed', done: false }, pfOpen: false,
+    pf: { health: '', lateIn: '', owner: '', tpl: '', sort: 'delayed', done: false }, pfOpen: false,
     // ③ 概要の絞り込み（F-3-9）
     df: { delayedOnly: false },
     // ④ボード・⑤リスト・⑥ガントの表示設定
@@ -323,6 +323,7 @@
     var pfh = t.closest('[data-pfh]');
     if (pfh) { var hv = pfh.getAttribute('data-pfh'); S.pf.health = S.pf.health === hv ? '' : hv; if (hv === 'done' && S.pf.health) S.pf.done = true; render(); return; }
     if (t.closest('[data-pftoggle]')) { S.pfOpen = !S.pfOpen; render(); return; }
+    if (t.closest('[data-pflate]')) { S.pf.lateIn = S.pf.lateIn ? '' : '1'; render(); return; }
     var pfc = t.closest('[data-pfclear]');
     if (pfc) { var ck = pfc.getAttribute('data-pfclear'); if (ck === 'done') S.pf.done = false; else S.pf[ck] = ''; render(); return; }
     // 切替ボタン（まとめ方・目盛り・ボードの列・スマホのガントの範囲）
@@ -889,8 +890,7 @@
         '<button type="button" data-ptab="list" class="' + (S.projectsTab !== 'gantt' ? 'active' : '') + '">一覧</button>' +
         '<button type="button" data-ptab="gantt" class="' + (S.projectsTab === 'gantt' ? 'active' : '') + '">ガント</button></div>';
     var pageHead = head('プロジェクト',
-        delayedTasks ? '<span class="late">遅延しているタスクが ' + delayedTasks + ' 件</span>あります（' + pjWithDelay + ' プロジェクト）'
-                     : '遅れているタスクはありません',
+        '全 ' + S.projects.length + ' 件',
         tabs + '<button type="button" class="btn primary" data-nav="new">' + ic('plus', 16) + 'プロジェクトを作成</button>');
 
     if (S.projectsTab === 'gantt') return pageHead + portfolioGanttBody();
@@ -901,6 +901,7 @@
       var isDone = p.status === 'done' || c.health === 'done';
       if (isDone && !S.pf.done && S.pf.health !== 'done') return false;
       if (S.pf.health && (S.pf.health === 'done' ? !isDone : c.health !== S.pf.health)) return false;
+      if (S.pf.lateIn && !(c.delayed_count > 0)) return false;
       if (S.pf.owner && p.owner_user_id !== S.pf.owner) return false;
       if (S.pf.tpl === '@none' ? !!p.template_id : (S.pf.tpl && p.template_id !== S.pf.tpl)) return false;
       return true;
@@ -913,14 +914,21 @@
       return d !== 0 ? d : (cb.delayed_count || 0) - (ca.delayed_count || 0);
     });
 
-    var sum = '<div class="sum" role="group" aria-label="状態で絞る">' +
+    var sum = '<div class="sum-cap">プロジェクトの状態<span>（プロジェクトの件数・押すと絞り込み）</span></div>' +
+      '<div class="sum" role="group" aria-label="プロジェクトの状態で絞る">' +
       [['delayed', '遅延'], ['on_track', '対応中'], ['not_started', '開始前'], ['done', '完了']].map(function (x) {
         return '<button type="button" data-pfh="' + x[0] + '" aria-pressed="' + (S.pf.health === x[0]) + '" class="' +
-          (x[0] === 'delayed' && cnt.delayed ? 'late ' : '') + (S.pf.health === x[0] ? 'active' : '') + '"><b>' + cnt[x[0]] + '</b><span>' + x[1] + '</span></button>';
-      }).join('') + '</div>';
+          (x[0] === 'delayed' && cnt.delayed ? 'late ' : '') + (S.pf.health === x[0] ? 'active' : '') + '"><b>' + cnt[x[0]] + '<small> 件</small></b><span>' + x[1] + '</span></button>';
+      }).join('') + '</div>' +
+      (delayedTasks
+        ? '<button type="button" class="lbanner' + (S.pf.lateIn ? ' active' : '') + '" data-pflate aria-pressed="' + !!S.pf.lateIn + '">' +
+            '<i aria-hidden="true">!</i><span><b>遅延しているタスク ' + delayedTasks + ' 件</b>（' + pjWithDelay + ' プロジェクト）</span>' +
+            '<span class="go">' + (S.pf.lateIn ? 'すべて表示' : 'そのプロジェクトだけ表示') + '</span></button>'
+        : '<div class="lbanner ok">遅れているタスクはありません</div>');
 
     var active = [];
     if (S.pf.health) active.push(['health', '状態：' + H.HEALTH_LABEL[S.pf.health]]);
+    if (S.pf.lateIn) active.push(['lateIn', '遅延タスクあり']);
     if (S.pf.owner) active.push(['owner', 'オーナー：' + (userName(S.pf.owner) || '—')]);
     if (S.pf.tpl) active.push(['tpl', 'テンプレート：' + (S.pf.tpl === '@none' ? 'なし' : ((S.templates.filter(function (t) { return t.template_id === S.pf.tpl; })[0] || {}).name || '—'))]);
     if (S.pf.done) active.push(['done', '完了も表示']);

@@ -343,6 +343,17 @@ select.qs { width: 100%; min-height: 36px; padding: 0 30px 0 10px; font-size: 13
 .sum button.late { border-color: color-mix(in srgb, var(--late) 45%, var(--line)); background: color-mix(in srgb, var(--late-bg) 55%, var(--surface)); }
 .sum button.late b, .sum button.late span { color: var(--late); }
 .sum button.active { outline: 2px solid var(--accent); outline-offset: -1px; }
+.sum b small { font-family: var(--f-body); font-size: 12px; color: var(--ink3); font-weight: 400; }
+.sum button.late b small { color: var(--late); }
+.sum-cap { font-size: 12.5px; font-weight: 700; color: var(--ink2); margin-bottom: -4px; }
+.sum-cap span { font-weight: 400; color: var(--ink3); font-size: 12px; }
+.lbanner { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--late) 40%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--late-bg) 55%, var(--surface)); color: var(--late); font-size: 13.5px; text-align: left; flex-wrap: wrap; }
+.lbanner > i { font-style: normal; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--late); color: var(--surface); font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.lbanner .go { margin-left: auto; font-size: 12.5px; font-weight: 700; white-space: nowrap; text-decoration: underline; text-underline-offset: 3px; }
+.lbanner.active { outline: 2px solid var(--accent); outline-offset: -1px; }
+.row.proj .r-name .t { flex-wrap: wrap; row-gap: 3px; }
+.row.proj .r-name .t .nm { white-space: normal; overflow: visible; }
+.lbanner.ok { border-color: var(--line); background: var(--surface); color: var(--ink3); }
 .fpanel { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
 .fpanel .field { margin: 0; }
 
