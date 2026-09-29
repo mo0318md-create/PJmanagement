@@ -123,7 +123,8 @@ settings       （key-value。1行1設定）
 | status | str | ○ | not_started | `not_started` / `in_progress` / `on_hold` / `done` |
 | start_date | date | ○ | | |
 | end_date | date | ○ | | start_date 以上であること |
-| custom_fields | json | | {} | 例: `{"client_name":"株式会社ABC","contract_type":"リニューアル"}` |
+| custom_fields | json | | {} | 設定項目の値。キーは field_defs の key。例: `{"client_name":"株式会社ABC","budget":480}` |
+| field_defs | json | | （空欄） | 設定項目の定義。`[{key,label,type,options,required,source}]`。type は `text`/`number`/`date`/`select`/`checkbox`。source は `template`（作成時にテンプレートからコピー。名前・型・必須は変えられない）/ `project`（そのプロジェクトで足した項目）。**作成時にコピーするので、テンプレートを後で変えても遡及しない**。空欄の古い行は、テンプレートの定義と値のキー（文字型）から組み立てて扱い、次に保存したときに埋まる |
 | next_item_seq | int | ○ | 1 | タスクキーの次の連番 |
 | created_at | ts | ○ | | |
 | updated_at | ts | ○ | | 衝突検知に使う（§5.1） |
@@ -264,7 +265,7 @@ settings       （key-value。1行1設定）
 | items.progress_rate | 0〜100 の整数。子を持つ行には入れられない |
 | items.parent_item_id | level=2 のとき必須。同じ project_id の level=1 の行を指すこと |
 | template_fields.field_key | 同じテンプレート内で重複しないこと。英数字とアンダースコアのみ |
-| projects.custom_fields | テンプレートの `required` が TRUE の項目は空にできない |
+| projects.custom_fields | `field_defs` で `required` が TRUE の項目は空にできない。値は `field_defs` の型に合っていること（数値・日付 yyyy-MM-dd・選択肢のどれか・真偽） |
 | 削除 | 子タスクを持つタスクは、先に子を消すか、まとめて消すか確認する |
 
 ---

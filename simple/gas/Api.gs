@@ -24,6 +24,7 @@ function currentUser_() {
 function getBootstrap() {
   var t = today_();
   var projects = readAll_('projects');
+  var tplFieldsAll = readAll_('template_fields');
   var cache = readAll_('summary_cache');
   var byId = {};
   cache.forEach(function (c) { byId[c.project_id] = c; });
@@ -68,7 +69,11 @@ function getBootstrap() {
     }),
     peopleSource: pp.source,
     peopleNote: note,
-    projects: projects.map(strip_),
+    projects: projects.map(function (p) {
+      var o = strip_(p);
+      o.field_defs = fieldDefsOf_(p, tplFieldsAll);
+      return o;
+    }),
     summary: summary,
     templates: readAll_('templates').map(strip_),
     settings: readSettings_(),
@@ -229,6 +234,102 @@ function deleteItem(itemId, withChildren) {
   });
 }
 
+/* ============ プロジェクトの設定項目 ============
+ *
+ * 1項目 = { key, label, type, options, required, source }
+ *   source 'template' … テンプレートからコピーした項目。名前・型・必須は画面から変えられない
+ *   source 'project'  … そのプロジェクトで足した項目。名前・型・選択肢を自由に決められる
+ * 値は projects.custom_fields に { key: 値 } で持つ。
+ */
+
+/** テンプレートの項目定義を、プロジェクトに持たせる形にする */
+function templateFieldDefs_(templateId, allFields) {
+  return allFields
+    .filter(function (f) { return f.template_id === templateId; })
+    .sort(function (a, b) { return (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0); })
+    .map(function (f) {
+      return {
+        key: f.field_key, label: f.label,
+        type: FIELD_TYPES.indexOf(f.type) >= 0 ? f.type : 'text',
+        options: f.options || [], required: !!f.required, source: 'template'
+      };
+    });
+}
+
+/**
+ * プロジェクトの項目定義を返す。
+ * field_defs 列が空欄の古い行は、テンプレートの定義と値のキーから組み立てる（保存した時点で列に入る）。
+ */
+function fieldDefsOf_(p, allTplFields) {
+  if (Array.isArray(p.field_defs)) return p.field_defs;
+  var defs = p.template_id ? templateFieldDefs_(p.template_id, allTplFields || readAll_('template_fields')) : [];
+  var seen = {};
+  defs.forEach(function (d) { seen[d.key] = true; });
+  Object.keys(p.custom_fields || {}).forEach(function (k) {
+    if (!seen[k]) defs.push({ key: k, label: k, type: 'text', options: [], required: false, source: 'project' });
+  });
+  return defs;
+}
+
+/** 画面から来た「そのプロジェクトで足した項目」の定義を確かめる */
+function cleanProjectDefs_(list, templateDefs) {
+  var labels = {}, keys = {};
+  templateDefs.forEach(function (d) { labels[String(d.label).toLowerCase()] = true; keys[d.key] = true; });
+  var out = [];
+  (list || []).forEach(function (d) {
+    var label = String(d.label || '').trim();
+    if (!label) return;                                  // 名前の無い行は捨てる
+    if (label.length > 40) throw new Error('項目名は40文字までにしてください：' + label);
+    if (labels[label.toLowerCase()]) throw new Error('項目名「' + label + '」が2つあります。別の名前にしてください');
+    labels[label.toLowerCase()] = true;
+
+    var type = FIELD_TYPES.indexOf(d.type) >= 0 ? d.type : 'text';
+    var options = [];
+    if (type === 'select') {
+      (Array.isArray(d.options) ? d.options : String(d.options || '').split(/[,、]/)).forEach(function (o) {
+        o = String(o).trim();
+        if (o && options.indexOf(o) < 0) options.push(o);
+      });
+      if (!options.length) throw new Error('「' + label + '」は選択肢の型です。選択肢を1つ以上入れてください');
+    }
+    var key = String(d.key || '').trim().slice(0, 64);
+    if (!key || keys[key]) key = 'f_' + uuid_().replace(/-/g, '').slice(0, 12);
+    keys[key] = true;
+    out.push({ key: key, label: label, type: type, options: options, required: false, source: 'project' });
+  });
+  return out;
+}
+
+/** 値を型に合わせて直す。定義に無いキーは持たない */
+function cleanFieldValues_(defs, values) {
+  values = values || {};
+  var out = {};
+  defs.forEach(function (d) {
+    var v = values[d.key];
+    if (d.type === 'checkbox') { out[d.key] = v === true || v === 'true'; return; }
+    if (v === undefined || v === null || String(v).trim() === '') { out[d.key] = ''; return; }
+    var s = String(v).trim();
+    if (d.type === 'number') {
+      var n = Number(s.replace(/,/g, ''));
+      if (isNaN(n)) throw new Error('「' + d.label + '」は数値で入れてください');
+      out[d.key] = n;
+    } else if (d.type === 'date') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error('「' + d.label + '」は日付で入れてください');
+      out[d.key] = s;
+    } else if (d.type === 'select') {
+      if ((d.options || []).indexOf(s) < 0) throw new Error('「' + d.label + '」の値が選択肢にありません：' + s);
+      out[d.key] = s;
+    } else {
+      out[d.key] = s;
+    }
+  });
+  var missing = defs.filter(function (d) { return d.required && (out[d.key] === '' || out[d.key] === false); });
+  if (missing.length) {
+    throw new Error('必須の設定項目が空です：' + missing.map(function (d) { return d.label; }).join('、'));
+  }
+  return out;
+}
+
 /** プロジェクトの設定を保存する */
 function saveProject(patch) {
   return withLock_(function () {
@@ -259,12 +360,19 @@ function saveProject(patch) {
       status: patch.status || cur.status,
       start_date: patch.start_date || '',
       end_date: patch.end_date || '',
-      custom_fields: patch.custom_fields || {},
       updated_at: now_()
     };
+    // テンプレート由来の項目は画面から変えさせない（名前・型・必須はプロジェクトが持つ控えのまま）
+    var curDefs = fieldDefsOf_(cur);
+    var tDefs = curDefs.filter(function (d) { return d.source === 'template'; });
+    var pDefs = patch.field_defs
+      ? cleanProjectDefs_(patch.field_defs.filter(function (d) { return d.source !== 'template'; }), tDefs)
+      : curDefs.filter(function (d) { return d.source !== 'template'; });
+    next.field_defs = tDefs.concat(pDefs);
+    next.custom_fields = cleanFieldValues_(next.field_defs, patch.custom_fields);
     updateRow_('projects', cur.project_id, next);
     refreshSummary_(cur.project_id);
-    return { ok: true, updated_at: next.updated_at };
+    return { ok: true, updated_at: next.updated_at, field_defs: next.field_defs, custom_fields: next.custom_fields };
   });
 }
 
@@ -278,15 +386,13 @@ function createProject(data) {
     if (!data.start_date) throw new Error('開始日は必須です');
 
     var tpl = data.template_id ? findById_('templates', data.template_id) : null;
-    var fields = tpl ? readAll_('template_fields').filter(function (f) { return f.template_id === tpl.template_id; }) : [];
-    var missing = fields.filter(function (f) {
-      if (!f.required) return false;
-      var v = (data.custom_fields || {})[f.field_key];
-      return v === undefined || v === null || v === '' || v === false;
-    });
-    if (missing.length) {
-      throw new Error('必須の設定項目が空です：' + missing.map(function (f) { return f.label; }).join('、'));
-    }
+    if (data.template_id && !tpl) throw new Error('選んだテンプレートが見つかりません。画面を再読み込みしてください');
+
+    // 設定項目の定義はテンプレートからコピーしてプロジェクトに持たせる（あとでテンプレートを変えても遡及しない F-1-9）
+    var tDefs = tpl ? templateFieldDefs_(tpl.template_id, readAll_('template_fields')) : [];
+    var pDefs = cleanProjectDefs_((data.field_defs || []).filter(function (d) { return d.source !== 'template'; }), tDefs);
+    var fieldDefs = tDefs.concat(pDefs);
+    var fieldValues = cleanFieldValues_(fieldDefs, data.custom_fields);
 
     var tplItems = tpl
       ? readAll_('template_items').filter(function (x) { return x.template_id === tpl.template_id; })
@@ -333,7 +439,8 @@ function createProject(data) {
       status: STATUS.NOT_STARTED,
       start_date: data.start_date,
       end_date: endDate,
-      custom_fields: data.custom_fields || {},
+      custom_fields: fieldValues,
+      field_defs: fieldDefs,
       next_item_seq: tplItems.length + 1,
       created_at: now_(),
       updated_at: now_()
@@ -581,7 +688,7 @@ function saveTemplateField(data) {
 
     var row = {
       template_id: data.template_id, field_key: key, label: data.label,
-      type: ['text', 'number', 'date', 'select', 'checkbox'].indexOf(data.type) >= 0 ? data.type : 'text',
+      type: FIELD_TYPES.indexOf(data.type) >= 0 ? data.type : 'text',
       required: !!data.required,
       options: data.type === 'select' ? String(data.options || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean) : []
     };

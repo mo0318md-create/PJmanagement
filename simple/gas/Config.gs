@@ -59,7 +59,7 @@ var SHEETS = {
   projects: {
     key: 'project_id',
     cols: ['project_id', 'key', 'name', 'description', 'template_id', 'template_name', 'owner_user_id',
-           'status', 'start_date', 'end_date', 'custom_fields', 'next_item_seq', 'created_at', 'updated_at']
+           'status', 'start_date', 'end_date', 'custom_fields', 'field_defs', 'next_item_seq', 'created_at', 'updated_at']
   },
   items: {
     key: 'item_id',
@@ -83,7 +83,8 @@ var SHEETS = {
 };
 
 /** JSON として読み書きする列 */
-var JSON_COLS = { custom_fields: '{}', options: '[]' };
+// field_defs は空欄（古い行）と [] を区別したいので、既定を null にする
+var JSON_COLS = { custom_fields: '{}', field_defs: 'null', options: '[]' };
 
 /** 真偽値として読み書きする列 */
 var BOOL_COLS = { active: true, required: false, read: false };
@@ -115,6 +116,9 @@ var STATUS = { NOT_STARTED: 'not_started', IN_PROGRESS: 'in_progress', ON_HOLD: 
 
 /** タスクの種別（3つ固定） */
 var ITEM_TYPES = ['work', 'bug', 'req'];
+
+/** 設定項目の型：文字 / 数値 / 日付 / 選択肢 / はい・いいえ */
+var FIELD_TYPES = ['text', 'number', 'date', 'select', 'checkbox'];
 
 /** タイムゾーン。日付の文字列化に使う */
 function TZ_() {

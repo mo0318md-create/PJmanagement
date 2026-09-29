@@ -283,6 +283,27 @@ textarea { resize: vertical; min-height: 72px; }
 .ti-row.head { font-size: 12px; font-weight: 700; color: var(--text-faint); background: var(--surface-2); }
 .ff-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 100px 60px 34px; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .ff-row.head { font-size: 12px; font-weight: 700; color: var(--text-faint); background: var(--surface-2); }
+/* ---- 設定項目の入力（1行 = 項目名・型・値） ---- */
+.fe { margin: 22px 0 18px; }
+.fe-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.fe-title h3 { margin: 0; font-size: 16px; }
+.fe-row { display: grid; grid-template-columns: minmax(0, 1.1fr) 132px minmax(0, 1.4fr) 34px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.fe-row.fe-colhead { font-size: 12px; font-weight: 700; color: var(--text-faint); margin-bottom: 4px; }
+.fe-row.tpl { background: var(--surface-2); border-radius: 9px; padding: 6px 0; }
+.fe-row.tpl .fe-name { padding-left: 13px; }
+.fe-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.fe-fixed { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.fe-typename { font-weight: 400; color: var(--text-muted); padding-left: 14px; }
+.fe-tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); white-space: nowrap; }
+.fe-tag.req { background: var(--h-delayed-bg); color: var(--h-delayed); font-weight: 700; }
+.fe-opts { grid-column: 1 / 3; display: flex; align-items: center; gap: 10px; }
+.fe-opts-lbl { font-size: 13px; color: var(--text-muted); white-space: nowrap; padding-left: 4px; }
+.fe-bad { border-color: var(--h-delayed) !important; box-shadow: 0 0 0 2px var(--h-delayed-bg); }
+.fe-check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; min-height: 40px; }
+.fe-check input { width: 18px; height: 18px; }
+.fe-empty { color: var(--text-faint); padding: 10px 0 12px; }
+.fe-dl { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 10px 16px; margin: 0; }
+.fe-dl dd { margin: 0; overflow-wrap: anywhere; }
 
 /* ---- 小窓 ---- */
 .backdrop { position: fixed; inset: 0; background: rgba(16, 24, 40, .38); z-index: 50; }
@@ -333,6 +354,15 @@ textarea { resize: vertical; min-height: 72px; }
   .board-wrap { overflow-x: auto; }
   .ti-row, .ff-row { grid-template-columns: minmax(0, 1fr) 34px; row-gap: 4px; }
   .ti-row > :nth-child(n+3):not(:last-child), .ff-row > :nth-child(n+2):not(:last-child) { display: none; }
+  .fe-row { grid-template-columns: minmax(0, 1fr) 112px 34px; row-gap: 6px; }
+  .fe-row.fe-colhead { display: none; }
+  .fe-row .fe-val { grid-column: 1 / -1; order: 4; }
+  .fe-row .fe-opts { grid-column: 1 / -1; order: 3; }
+  .fe-row.tpl { padding: 8px 10px; }
+  .fe-row.tpl .fe-name { padding-left: 0; }
+  .fe-typename { padding-left: 0; }
+  .fe-dl { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .fe-dl dd { margin-bottom: 10px; }
 }
 .sidebar a .short { display: none; }
 </style>

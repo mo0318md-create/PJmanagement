@@ -9,6 +9,8 @@
  */
 
 /** シートを取る。無ければ作ってヘッダーを入れる */
+var COLS_CHECKED_ = {};
+
 function sheet_(name) {
   var ss = SS_();
   var sh = ss.getSheetByName(name);
@@ -17,7 +19,15 @@ function sheet_(name) {
     var cols = SHEETS[name].cols;
     sh.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');
     sh.setFrozenRows(1);
+  } else if (!COLS_CHECKED_[name] && SHEETS[name]) {
+    // 列を足したとき、既存のシートにも見出しを足す。見出しが無い列は書き込みが黙って捨てられるため
+    var head = header_(sh);
+    var missing = SHEETS[name].cols.filter(function (c) { return head.indexOf(c) < 0; });
+    if (head.length && missing.length) {
+      sh.getRange(1, head.length + 1, 1, missing.length).setValues([missing]).setFontWeight('bold');
+    }
   }
+  COLS_CHECKED_[name] = true;
   return sh;
 }
 
