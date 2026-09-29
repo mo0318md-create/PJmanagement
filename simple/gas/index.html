@@ -9,23 +9,28 @@
 
 <div class="app">
   <header class="topbar">
-    <div class="brand"><span class="logo">P</span>PJ管理</div>
+    <div class="brand"><i>PJ</i><span>PJ管理</span></div>
+    <button type="button" class="gsearch" id="gsearch" data-nav="search" aria-label="タスク・プロジェクトを探す">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.4-4.4"/></svg>
+      タスク・プロジェクトを探す<kbd>/</kbd>
+    </button>
     <span class="spacer"></span>
+    <span class="savest" id="savest" role="status" aria-live="polite"></span>
     <button type="button" class="icon-btn" id="btn-bell" aria-label="お知らせ">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 16v-5a5.5 5.5 0 0 1 11 0v5l1.5 2h-14z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>
       <span class="bell-dot" id="bell-dot" hidden></span>
     </button>
-    <span class="today" id="today">—</span>
-    <span class="me" id="me">—</span>
+    <span class="me"><span class="av" id="me-av"></span><span id="me">—</span></span>
   </header>
 
-  <div class="body">
-    <nav class="sidebar" id="sidebar"></nav>
-    <main class="main" id="main">
-      <div class="loading">読み込んでいます…</div>
-    </main>
-  </div>
+  <nav class="sidebar" id="sidebar" aria-label="メニュー"></nav>
+  <main class="main" id="main">
+    <div class="skel" aria-label="読み込んでいます"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  </main>
 </div>
+
+<nav class="tabbar" id="tabbar" aria-label="メニュー"></nav>
+<button type="button" class="fab" id="fab" hidden></button>
 
 <div class="backdrop" id="backdrop" hidden></div>
 <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title"></div>
