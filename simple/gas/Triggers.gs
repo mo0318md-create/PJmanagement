@@ -104,7 +104,7 @@ function cleanOldNotifications_(keepDays) {
 
 function fmtDate_(iso) {
   if (!iso) return '';
-  var d = hParse_(iso);
-  var w = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
-  return (d.getMonth() + 1) + '/' + d.getDate() + '(' + w + ')';
+  // 期限の表示は yyyy/mm/dd に統一（画面と同じ）
+  var d = hParse_(iso), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '/' + p2(d.getMonth() + 1) + '/' + p2(d.getDate());
 }

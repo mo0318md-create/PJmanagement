@@ -157,7 +157,8 @@ function strip_(o) {
 /**
  * タスクを保存する。変えた1行だけを書く。
  * @param patch { item_id, name, description, item_type, assignee_user_id,
- *                status, start_date, end_date, progress_rate, updated_at }
+ *                status, start_date, end_date, progress_rate, depends_on?, updated_at }
+ *   depends_on は渡したときだけ書き換える（ガントやボードからの保存では渡さない）
  *   updated_at は読み込んだときの値。ほかの人が先に更新していたら弾く。
  */
 function saveItem(patch) {
@@ -180,6 +181,9 @@ function saveItem(patch) {
       start_date: patch.start_date || '',
       end_date: patch.end_date || ''
     };
+    if (Array.isArray(patch.depends_on)) {
+      next.depends_on = cleanDeps_(cur.item_id, cur.project_id, cur.parent_item_id, patch.depends_on);
+    }
     stampEdit_(next, me);
 
     // 子タスクを持つ行は進捗率を持たない（子の平均になるため）
@@ -239,8 +243,10 @@ function addItem(data) {
       status: data.status || STATUS.NOT_STARTED,
       start_date: data.start_date || '',
       end_date: data.end_date || '',
-      progress_rate: data.status === STATUS.DONE ? 100 : clampRate_(data.progress_rate)
+      progress_rate: data.status === STATUS.DONE ? 100 : clampRate_(data.progress_rate),
+      depends_on: []
     };
+    if (Array.isArray(data.depends_on)) item.depends_on = cleanDeps_(item.item_id, item.project_id, item.parent_item_id, data.depends_on);
     stampNew_(item, me);
     insertRow_('items', item);
     // 連番だけを進める。プロジェクトの更新日時は変えない
@@ -263,6 +269,13 @@ function deleteItem(itemId, withChildren) {
     }
     kids.forEach(function (k) { deleteRow_('items', k.item_id); });
     deleteRow_('items', itemId);
+    // 消したタスクを「前のタスク」にしていた行から外す。更新日時は変えない（開いている人の保存を弾かないように）
+    var gone = [itemId].concat(kids.map(function (k) { return k.item_id; }));
+    readAll_('items').forEach(function (x) {
+      if (x.project_id !== cur.project_id || !Array.isArray(x.depends_on) || !x.depends_on.length) return;
+      var left = x.depends_on.filter(function (d) { return gone.indexOf(d) < 0; });
+      if (left.length !== x.depends_on.length) updateRow_('items', x.item_id, { depends_on: left });
+    });
     return {
       ok: true, deleted: kids.length + 1,
       ids: [itemId].concat(kids.map(function (k) { return k.item_id; })),
@@ -816,6 +829,39 @@ function clampRate_(v) {
   var n = Number(v);
   if (isNaN(n)) return 0;
   return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/**
+ * 「前のタスク」を確かめて整える。同じプロジェクトの、自分・自分の親・自分の子以外のタスクだけ。
+ * たどって自分に戻る（ぐるぐる回る）つなぎ方は受け付けない。
+ */
+function cleanDeps_(selfId, projectId, parentId, list) {
+  var all = readAll_('items').filter(function (x) { return x.project_id === projectId; });
+  var byId = {};
+  all.forEach(function (x) { byId[x.item_id] = x; });
+  var out = [];
+  list.forEach(function (id) {
+    id = String(id || '');
+    var x = byId[id];
+    if (!x || id === selfId || out.indexOf(id) >= 0) return;
+    if (id === parentId) throw new Error('親タスク「' + x.name + '」は前のタスクにできません');
+    if (x.parent_item_id && x.parent_item_id === selfId) throw new Error('子タスク「' + x.name + '」は前のタスクにできません');
+    out.push(id);
+  });
+  if (out.length > 20) throw new Error('前のタスクは20件までです');
+  // 自分から後ろへたどって、選んだタスクに行き着くなら輪になる
+  out.forEach(function (id) {
+    var seen = {}, stack = [id];
+    while (stack.length) {
+      var cur = stack.pop();
+      if (cur === selfId) throw new Error('「' + byId[id].name + '」は、このタスクの完了を待つ側にあるため、前のタスクにできません');
+      if (seen[cur]) continue;
+      seen[cur] = true;
+      var deps = cur === selfId ? out : ((byId[cur] && byId[cur].depends_on) || []);
+      deps.forEach(function (d) { stack.push(d); });
+    }
+  });
+  return out;
 }
 
 function validateItem_(o) {

@@ -19,6 +19,7 @@
   --done: #56616C; --done-bg: #E6E9EC;
   --save: #9A6412; --save-bg: #FBEFD6; --save-line: #E8B962;
   --today: #D2452F;
+  --warn: #B4560F; --warn-bg: #FCEBDD;
   --shadow: 0 1px 2px rgba(20, 28, 36, .06), 0 8px 24px rgba(20, 28, 36, .12);
   --f-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
   --f-disp: "Zen Kaku Gothic New", "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
@@ -38,7 +39,7 @@
     --ink: #E4E7E3; --ink2: #AEB5BA; --ink3: #7F888E;
     --accent: #97A5F4; --accent-hover: #B3BDF7; --accent-ink: #10152E; --accent-soft: #252C4C;
     --late: #F0856F; --late-bg: #3A2320; --on: #6FCB98; --on-bg: #1C3327; --pre: #C9BC9B; --pre-bg: #2E2A21;
-    --done: #A7B1BB; --done-bg: #262C32; --save: #F2C46E; --save-bg: #3A2F18; --save-line: #8A6A2C; --today: #F07A62;
+    --done: #A7B1BB; --done-bg: #262C32; --save: #F2C46E; --save-bg: #3A2F18; --save-line: #8A6A2C; --today: #F07A62; --warn: #F2A266; --warn-bg: #3A2718;
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .45);
   }
 }
@@ -243,10 +244,15 @@ textarea { resize: vertical; min-height: 72px; }
 .r-name .t a.nm:hover { color: var(--accent); text-decoration: underline; }
 .r-name.lv2 { padding-left: 24px; }
 .r-name.lv2 .t .nm { font-weight: 400; }
-.r-sub, .r-sub2 { font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 日付が yyyy/mm/dd で長くなったので、切らずに折り返す（日付そのものは途中で割らない） */
+.r-sub, .r-sub2 { font-size: 12px; color: var(--ink3); line-height: 1.5; overflow-wrap: normal; }
+.r-sub .mono, .r-sub2 .upd-at { white-space: nowrap; }
 .r-sub .k { font-family: var(--f-mono); }
 .r-sub2 { display: none; }
 .r-due { font-size: 12.5px; white-space: nowrap; }
+.due-d { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink3); white-space: nowrap; }
+.due-d.blk { display: block; }
+.due-in { white-space: nowrap; }
 .r-upd { font-size: 12px; color: var(--ink3); line-height: 1.4; min-width: 0; }
 .r-upd b { display: block; color: var(--ink2); font-weight: 400; font-family: var(--f-mono); font-size: 11.5px; }
 .r-num { font-family: var(--f-mono); font-size: 15px; text-align: right; }
@@ -365,7 +371,7 @@ select.qs { width: 100%; min-height: 36px; padding: 0 30px 0 10px; font-size: 13
 .mx > div:first-child { border-left: 0; }
 .mx .k { font-size: 11.5px; color: var(--ink3); letter-spacing: .03em; }
 .mx .v { font-family: var(--f-mono); font-size: 18px; line-height: 1.25; }
-.mx .v small { font-size: 12px; color: var(--ink3); margin-left: 4px; font-family: var(--f-body); }
+.mx .v small { font-size: 12px; color: var(--ink3); margin-left: 4px; font-family: var(--f-body); white-space: nowrap; display: inline-block; }
 .mx .note { font-size: 11.5px; color: var(--ink3); }
 .views { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
@@ -414,8 +420,9 @@ select.qs { width: 100%; min-height: 36px; padding: 0 30px 0 10px; font-size: 13
 .gantt .g-name { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; font-weight: 700; }
 .gantt .g-name .link, .gantt .g-name .txt { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .gantt .g-name .link:hover { color: var(--accent); text-decoration: underline; }
-.gantt .g-dates { font-size: 11.5px; color: var(--ink3); font-family: var(--f-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gantt .g-dates { font-size: 11.5px; line-height: 1.45; color: var(--ink3); font-family: var(--f-mono); }  /* yyyy/mm/dd で長くなったので折り返す */
 .gantt .g-dates .late { font-family: var(--f-body); }
+.gantt .g-dates .nw { white-space: nowrap; font-family: var(--f-body); }
 .gantt .g-row.lv2 .g-label { padding-left: 32px; }
 .gantt .g-row.lv2 .g-name { font-weight: 400; }
 .gantt .g-track { position: relative; margin: 0 12px; }
@@ -457,7 +464,7 @@ select.qs { width: 100%; min-height: 36px; padding: 0 30px 0 10px; font-size: 13
 .gm-axis .g-todaytag { top: auto; bottom: 5px; }
 .gm-row { padding: 10px 14px 12px; border-top: 1px solid var(--line2); }
 .gm-row:first-of-type { border-top: 0; }
-.gm-row .gm-n { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.gm-row .gm-n { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
 .gm-row .gm-n a, .gm-row .gm-n b { font-weight: 700; font-size: 14px; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
 .gm-row.lv2 .gm-n a { font-weight: 400; }
 .gm-row.lv2 { padding-left: 26px; }
@@ -743,4 +750,32 @@ mark { background: color-mix(in srgb, var(--save-line) 45%, transparent); color:
   .page-head .acts { width: 100%; }
   .page-head .acts .seg { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
 }
+
+/* ================================================================ 依存関係（前のタスク → 後のタスク） */
+.dchip { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px; border-radius: 999px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-family: var(--f-body); }
+.dchip.wait { background: var(--pre-bg); color: var(--pre); }
+.dchip.clash { background: var(--warn-bg); color: var(--warn); }
+.tcard .dline { display: flex; flex-wrap: wrap; gap: 4px; margin-top: -2px; }
+.gantt .g-dates .dchip { margin: 2px 4px 0 0; height: 18px; font-size: 11px; }
+.gm-dep { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
+.gantt .g-rows { position: relative; }
+svg.g-links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 2; overflow: visible; }
+svg.g-links path { fill: none; stroke: var(--ink3); stroke-width: 1.5; opacity: .85; }
+svg.g-links path.clash { stroke: var(--warn); stroke-dasharray: 4 3; opacity: 1; }
+svg.g-links marker path { stroke: none; fill: var(--ink3); }
+svg.g-links #g-arrow-c path { fill: var(--warn); }
+body.is-dragging svg.g-links { opacity: .25; }
+.dep-sec { display: flex; flex-direction: column; gap: 6px; }
+.dep-sec + .dep-sec { margin-top: 12px; }
+.dep-h { font-size: 12.5px; font-weight: 700; color: var(--ink2); }
+.dep-h span { font-weight: 400; color: var(--ink3); margin-left: 8px; font-size: 12px; }
+.dep-it { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border: 1px solid var(--line); border-radius: 9px; min-height: 44px; background: var(--surface); }
+.dep-it a { flex: 1; min-width: 0; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.dep-it a:hover { color: var(--accent); }
+.dep-it .mono { font-size: 12px; white-space: nowrap; }
+.dep-x { border: 0; background: none; width: 32px; height: 32px; border-radius: 8px; color: var(--ink3); display: grid; place-items: center; flex-shrink: 0; }
+.dep-x:hover { background: var(--sunken); color: var(--ink); }
+.dep-warn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+.dep-warn .btn { background: var(--surface); }
+.field > label svg { vertical-align: -2px; }
 </style>

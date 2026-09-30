@@ -162,6 +162,7 @@ settings       （key-value。1行1設定）
 | start_date | date | | | |
 | end_date | date | | | |
 | progress_rate | int | | 0 | 0〜100。**子を持たないタスクだけ**が持つ。子を持つ行は空（要件 §3.2） |
+| depends_on | json | | [] | 前のタスク（これが終わってから始める）の item_id の配列（要件 F-3-19）。同じプロジェクトの、自分・親・子以外。輪になるつなぎ方は保存しない。タスクを消したら、ほかの行からも外す（更新日時は変えない） |
 | created_at | ts | ○ | | |
 | updated_at | ts | ○ | | 衝突検知に使う |
 | created_by / created_by_name | str | | | 登録者（`projects` の「登録者・更新者の列」と同じ） |
@@ -194,6 +195,7 @@ settings       （key-value。1行1設定）
 | `notify_due` | TRUE | お知らせ：期限の前日と当日 |
 | `notify_delayed` | TRUE | お知らせ：遅延になった |
 | `notify_keep_days` | 90 | お知らせを残す日数 |
+| `show_planned` | TRUE | 表示：進捗バーに今日時点の予定（縦線）と予定％を出す（F-5-16） |
 
 > 完全版から削除：`default_progress_mode`、`threshold_at_risk`、`threshold_delayed`（状態は終了日だけで決めるため）、
 > `overload_threshold`、`rollup_weight`、`size_days`、`hours_per_day`、`weekly_capacity_days`、`notify_overload`、`notify_baseline`。

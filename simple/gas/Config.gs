@@ -68,7 +68,7 @@ var SHEETS = {
     key: 'item_id',
     cols: ['item_id', 'project_id', 'item_key', 'level', 'parent_item_id', 'sort_order',
            'name', 'description', 'item_type', 'assignee_user_id', 'status',
-           'start_date', 'end_date', 'progress_rate', 'created_at', 'updated_at', 'created_by', 'created_by_name', 'updated_by', 'updated_by_name']
+           'start_date', 'end_date', 'progress_rate', 'depends_on', 'created_at', 'updated_at', 'created_by', 'created_by_name', 'updated_by', 'updated_by_name']
   },
   settings: {
     key: 'key',
@@ -87,7 +87,8 @@ var SHEETS = {
 
 /** JSON として読み書きする列 */
 // field_defs は空欄（古い行）と [] を区別したいので、既定を null にする
-var JSON_COLS = { custom_fields: '{}', field_defs: 'null', options: '[]' };
+// depends_on は「このタスクの前に終わらせるタスク」の item_id の配列
+var JSON_COLS = { custom_fields: '{}', field_defs: 'null', options: '[]', depends_on: '[]' };
 
 /** 真偽値として読み書きする列 */
 var BOOL_COLS = { active: true, required: false, read: false };
@@ -104,14 +105,16 @@ var SETTING_DEFAULTS = {
   notify_assign: 'TRUE',
   notify_due: 'TRUE',
   notify_delayed: 'TRUE',
-  notify_keep_days: '90'
+  notify_keep_days: '90',
+  show_planned: 'TRUE'
 };
 
 var SETTING_DESC = {
   notify_assign: 'お知らせ：担当になった／外れた',
   notify_due: 'お知らせ：期限の前日と当日',
   notify_delayed: 'お知らせ：遅延になった',
-  notify_keep_days: 'お知らせを残す日数'
+  notify_keep_days: 'お知らせを残す日数',
+  show_planned: '表示：進捗バーに今日時点の予定（縦線）と予定％を出す'
 };
 
 /** ステータス（4つ固定） */

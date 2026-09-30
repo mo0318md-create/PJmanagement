@@ -34,7 +34,7 @@
     portfolioOpen: {}, portfolioScale: 'month', portfolioOwner: '', portfolioShowDone: false,
     // ①一覧／②ガント、⑪一覧／⑫ガント の切替
     projectsTab: 'list', peopleTab: 'list',
-    settingsTab: 'notify',
+    settingsTab: 'display',
     // ⑬個人ページで見ている人（未指定なら自分）
     memberUserId: null, memberTab: 'delayed',
     // ⑭マイタスクの区分（S.tab はプロジェクト詳細専用なので別に持つ）
@@ -98,6 +98,11 @@
   }
   function weekStart(iso) { var dow = H.parse(iso).getDay(); return H.addDays(iso, dow === 0 ? -6 : 1 - dow); }
   function md(iso) { var d = H.parse(iso); return (d.getMonth() + 1) + '/' + d.getDate(); }
+  /** 期限の表示は yyyy/mm/dd に統一 */
+  function ymd(iso) {
+    var d = H.parse(iso), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '/' + p2(d.getMonth() + 1) + '/' + p2(d.getDate());
+  }
 
   /** スマホの幅か。ボード・ガントはスマホで作りが変わるので、幅が境目を越えたら描き直す */
   var phoneMq = window.matchMedia('(max-width: 600px)');
@@ -169,7 +174,9 @@
     check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
     move: '<path d="M5 12h14M14 7l5 5-5 5"/>',
-    filter: '<path d="M4 6h16M7 12h10M10 18h4"/>'
+    filter: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+    wait: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 2"/>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'
   };
   function ic(n, s) {
     s = s || 18;
@@ -489,7 +496,49 @@
       else scrollToToday(el);
     });
     scrollKey = key;
+    drawDepLinks();
   }
+
+  /**
+   * ガントに、前のタスクのバーの右端から後のタスクのバーの左端へ矢印を引く。
+   * 前のタスクが終わる前に始まる予定のもの（日程が前後）は、橙の点線にする。
+   */
+  function drawDepLinks() {
+    Array.prototype.forEach.call(document.querySelectorAll('#main .gantt .g-rows'), function (rowsEl) {
+      var svg = rowsEl.querySelector('svg.g-links');
+      if (!svg) return;
+      var base = rowsEl.getBoundingClientRect();
+      svg.setAttribute('width', rowsEl.scrollWidth); svg.setAttribute('height', rowsEl.scrollHeight);
+      var bars = {};
+      Array.prototype.forEach.call(rowsEl.querySelectorAll('[data-gbar^="item:"]'), function (b) { bars[b.getAttribute('data-gbar').slice(5)] = b; });
+      var paths = '';
+      Object.keys(bars).forEach(function (id) {
+        var x = itemById(id);
+        if (!x) return;
+        var clashIds = depInfo(x).clash.map(function (p) { return p.item_id; });
+        depIds(x).forEach(function (pid) {
+          var from = bars[pid], to = bars[id];
+          if (!from) return;
+          var a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+          var x1 = a.right - base.left, y1 = a.top + a.height / 2 - base.top;
+          var x2 = b.left - base.left, y2 = b.top + b.height / 2 - base.top;
+          var d;
+          if (x2 - x1 >= 16) {
+            var mx = x1 + 8;
+            d = 'M' + x1 + ',' + y1 + ' H' + mx + ' V' + y2 + ' H' + (x2 - 1);
+          } else {
+            // 後のタスクが前のタスクの終わりより左から始まるときは、行の間を回って入る
+            var gy = y2 + (y2 > y1 ? -1 : 1) * (b.height / 2 + 6);
+            d = 'M' + x1 + ',' + y1 + ' h8 V' + gy + ' H' + (x2 - 8) + ' V' + y2 + ' H' + (x2 - 1);
+          }
+          var cl = clashIds.indexOf(pid) >= 0;
+          paths += '<path class="' + (cl ? 'clash' : '') + '" d="' + d + '" marker-end="url(#g-arrow' + (cl ? '-c' : '') + ')"/>';
+        });
+      });
+      svg.innerHTML = paths ? '<defs>' + ['', '-c'].map(function (k) { return '<marker id="g-arrow' + k + '" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z"/></marker>'; }).join('') + '</defs>' + paths : '';
+    });
+  }
+  window.addEventListener('resize', function () { drawDepLinks(); });
 
   function renderView() {
     var m = $('main');
@@ -543,13 +592,24 @@
     var cls = t === 'bug' ? ' bug' : (t === 'req' ? ' req' : '');
     return '<span class="type' + cls + '">' + (H.TYPE_LABEL[t] || '作業') + '</span>';
   }
+  /** 予定（今日時点の予定進捗）を出すか。管理者が設定で全員分まとめて切り替える（F-5-16） */
+  function showPlanned() { return String((S.settings || {}).show_planned).toUpperCase() !== 'FALSE'; }
+  function progLabel() { return showPlanned() ? '進捗（縦線＝今日の予定）' : '進捗'; }
+
   function progBar(calc) {
     var a = Math.round((calc.actualRate || 0) * 100);
-    var marker = calc.plannedRate === null || calc.plannedRate === undefined ? ''
+    var marker = !showPlanned() || calc.plannedRate === null || calc.plannedRate === undefined ? ''
       : '<span class="planned" style="left:' + (calc.plannedRate * 100).toFixed(1) + '%" title="予定 ' + Math.round(calc.plannedRate * 100) + '%"></span>';
     return '<div class="prog-wrap"><div class="prog ' + calc.health + '">' +
       '<div class="fill" style="width:' + a + '%"></div>' + marker + '</div>' +
       '<span class="pct">' + a + '%</span></div>';
+  }
+  /** 期限の区分（あと N 日など）に、期限の日付 yyyy/mm/dd を添える。inline=true は1行に並べる */
+  function dueWithDate(calc, endIso, inline) {
+    var t = dueText(calc);
+    if (!endIso) return t;
+    return inline ? '<span class="due-in">' + t + ' <span class="due-d">' + ymd(endIso) + '</span></span>'
+      : t + '<span class="due-d blk">' + ymd(endIso) + '</span>';
   }
   function dueText(calc) {
     if (calc.health === 'done') return '<span class="faint">済み</span>';
@@ -582,9 +642,35 @@
       (o.acts ? '<div class="r-acts">' + o.acts + '</div>' : '') + '</div>';
   }
   function rowHead(first, whoLabel) {
-    return '<div class="row head" aria-hidden="true"><span>' + first + '</span><span>状態</span><span>進捗（｜は予定）</span><span>期限</span>' +
+    return '<div class="row head" aria-hidden="true"><span>' + first + '</span><span>状態</span><span>' + progLabel() + '</span><span>期限</span>' +
       '<span class="r-who">' + (whoLabel || '担当') + '</span><span class="r-upd">最終更新</span></div>';
   }
+  /* ---------------- 依存関係（前のタスク → 後のタスク。前が終わってから後を始める） ---------------- */
+  function depIds(x) { return x && Array.isArray(x.depends_on) ? x.depends_on.filter(function (id) { return !!itemById(id); }) : []; }
+  function succOf(id) { return (S.items || []).filter(function (x) { return depIds(x).indexOf(id) >= 0; }); }
+  /** 待ち（前のタスクが終わっていない）と、日程の前後（前のタスクが終わる前に始まる予定）を調べる */
+  function depInfo(x, startDate) {
+    var preds = depIds(x).map(itemById);
+    var s = startDate === undefined ? x.start_date : startDate;
+    return {
+      preds: preds,
+      waiting: x.status === 'done' ? [] : preds.filter(function (p) { return p.status !== 'done'; }),
+      clash: x.status === 'done' || !s ? [] : preds.filter(function (p) { return p.status !== 'done' && p.end_date && s <= p.end_date; })
+    };
+  }
+  /** 名前の横に出す印。「待ち：要件定義」「日程が前後」 */
+  function depChips(x) {
+    var d = depInfo(x);
+    if (!d.preds.length) return '';
+    var h = '';
+    if (d.waiting.length) {
+      h += '<span class="dchip wait" title="' + esc('前のタスク：' + d.waiting.map(function (p) { return p.name; }).join('、')) + '">' + ic('wait', 12) +
+        '待ち：' + esc(d.waiting[0].name) + (d.waiting.length > 1 ? ' ほか' + (d.waiting.length - 1) : '') + '</span>';
+    }
+    if (d.clash.length) h += '<span class="dchip clash" title="前のタスクが終わる前に始まる予定です">日程が前後</span>';
+    return h;
+  }
+
   /** タスクの1行。opts: { pj: プロジェクト名, toggle: 開閉ボタン, extra: 名前の後ろに足すもの, nameHtml: 強調つきの名前 } */
   function taskRow(n, calc, opts) {
     opts = opts || {};
@@ -593,29 +679,27 @@
     return row({
       lv2: lv2, cls: opts.cls, acts: opts.acts,
       name: (opts.toggle || '') + typeChip(n.item_type) +
-        '<a class="nm" data-edit="' + esc(n.item_id) + '">' + (opts.nameHtml || esc(n.name)) + '</a>' + (opts.extra || ''),
+        '<a class="nm" data-edit="' + esc(n.item_id) + '">' + (opts.nameHtml || esc(n.name)) + '</a>' + depChips(n) + (opts.extra || ''),
       sub: '<span class="k">' + esc(n.item_key) + '</span>' + (opts.pj ? ' ・ ' + esc(opts.pj) : '') +
         (parent && (opts.flat || opts.pj) ? ' ・ └ ' + esc(parent.name) : '') +
         (n.start_date && n.end_date ? ' ・ <span class="mono">' + shortRange(n.start_date, n.end_date) + '</span>' : ''),
-      sub2: esc(userName(n.assignee_user_id) || '未アサイン') + (n.updated_at ? ' ・ ' + esc(shortStamp(n.updated_at, n.updated_by_name)) : ''),
-      st: badge(calc.health), prog: progBar(calc), due: dueText(calc),
+      sub2: esc(userName(n.assignee_user_id) || '未アサイン') + (n.updated_at ? ' ・ <span class="upd-at">' + esc(shortStamp(n.updated_at, n.updated_by_name)) + '</span>' : ''),
+      st: badge(calc.health), prog: progBar(calc), due: dueWithDate(calc, n.end_date),
       who: assignee(n.assignee_user_id), upd: updHtml(n.updated_at, n.updated_by_name)
     });
   }
   function emptyBox(msg, action) {
     return '<div class="empty">' + esc(msg) + (action || '') + '</div>';
   }
-  /** '2026-09-28T14:03:00+09:00' → '9/28(月) 14:03'（今年でなければ年も付ける） */
+  /** '2026-09-28T14:03:00+09:00' → '2026/09/28 14:03'（最終更新・登録の日時は yyyy/mm/dd に統一） */
   function fmtStamp(iso) {
     var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
     if (!m) return iso ? String(iso) : '';
-    var w = '日月火水木金土'.charAt(new Date(+m[1], +m[2] - 1, +m[3]).getDay());
-    return (m[1] !== String(S.today).slice(0, 4) ? m[1] + '/' : '') + (+m[2]) + '/' + (+m[3]) + '(' + w + ') ' + m[4] + ':' + m[5];
+    return m[1] + '/' + m[2] + '/' + m[3] + ' ' + m[4] + ':' + m[5];
   }
   function shortStamp(iso, name) {
-    var m = String(iso || '').match(/^\d{4}-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
-    if (!m) return '';
-    return '更新 ' + (+m[1]) + '/' + (+m[2]) + ' ' + m[3] + ':' + m[4] + (name ? ' ' + name : '');
+    var t = fmtStamp(iso);
+    return t ? '更新 ' + t + (name ? ' ' + name : '') : '';
   }
   function stampText(iso, name) {
     if (!iso) return '記録なし';
@@ -761,7 +845,8 @@
       }
 
       var meta = r.metaHtml !== undefined ? r.metaHtml
-        : (r.startDate && r.endDate ? shortRange(r.startDate, r.endDate) + ' ・ ' + dueText(c) : '期間未設定') + (r.tag ? ' ・ ' + esc(r.tag) : '');
+        : (r.startDate && r.endDate ? shortRange(r.startDate, r.endDate) + ' ・ ' + dueText(c) : '期間未設定') + (r.tag ? ' ・ <span class="nw">' + esc(r.tag) + '</span>' : '');
+      if (r.href && itemById(r.href)) meta += depChips(itemById(r.href));
       var label = '<div class="g-label"><div class="g-name">' + nameHtml + '</div><div class="g-dates">' + meta + '</div></div>';
       if (!r.startDate || !r.endDate) {
         return '<div class="g-row lv' + (r.level || 1) + '">' + label + '<div class="g-track">' + lines + todayLine + '</div></div>';
@@ -778,7 +863,7 @@
       return '<div class="g-row lv' + (r.level || 1) + '">' + label + '<div class="g-track">' + lines + bar + todayLine + '</div></div>';
     }).join('');
 
-    return '<div class="gantt-scroll"><div class="gantt" data-min="' + esc(min) + '" data-span="' + axis.span + '">' + head + '<div class="g-rows">' + body + '</div></div></div>';
+    return '<div class="gantt-scroll"><div class="gantt" data-min="' + esc(min) + '" data-span="' + axis.span + '">' + head + '<div class="g-rows">' + body + '<svg class="g-links" aria-hidden="true"></svg></div></div></div>';
   }
 
   /**
@@ -800,8 +885,8 @@
     function track(s, e, calc, tapKey) {
       if (!s || !e) return '<div class="gm-track"' + (tapKey ? ' data-gtap="' + tapKey + '"' : '') + '>' + lines + '<span class="gm-out" style="left:4px">期間未設定（押して決める）</span></div>';
       var inner;
-      if (e < start) inner = '<span class="gm-out" style="left:4px">‹ ' + md(e) + ' まで</span>';
-      else if (s > end) inner = '<span class="gm-out" style="right:4px">' + md(s) + ' から ›</span>';
+      if (e < start) inner = '<span class="gm-out" style="left:4px">‹ ' + ymd(e) + ' まで</span>';
+      else if (s > end) inner = '<span class="gm-out" style="right:4px">' + ymd(s) + ' から ›</span>';
       else {
         var l = Math.max(0, pos(s)), r = Math.min(100, pos(e) + 100 / days);
         var done = Math.round(((calc && calc.actualRate) || 0) * 100);
@@ -824,7 +909,8 @@
       }
       return '<div class="gm-row' + (Number(r.level) === 2 ? ' lv2' : '') + '">' +
         '<div class="gm-n">' + (r.href ? '<a data-edit="' + esc(r.href) + '">' + esc(r.name) + '</a>' : '<b>' + esc(r.name) + '</b>') +
-          '<span class="gm-d">' + (r.startDate && r.endDate ? shortRange(r.startDate, r.endDate) + ' ・ ' + dueText(c) : '') + '</span></div>' +
+          '<span class="gm-d">' + (r.startDate && r.endDate ? shortRange(r.startDate, r.endDate) + ' ・ ' + dueText(c) : '') + '</span>' +
+          (r.href && itemById(r.href) && depIds(itemById(r.href)).length ? '<span class="gm-dep">' + depChips(itemById(r.href)) + '</span>' : '') + '</div>' +
         track(r.startDate, r.endDate, c, r.href ? 'item:' + r.href : '') +
       '</div>';
     }).join('');
@@ -857,10 +943,8 @@
     return '<div class="gantt-card">' + ganttHtml(rows, opt) + ganttLegend() + '</div>';
   }
 
-  function shortRange(s, e) {
-    var f = function (iso) { var d = H.parse(iso); return (d.getMonth() + 1) + '/' + d.getDate(); };
-    return f(s) + '〜' + f(e);
-  }
+  /** 期間の表示。yyyy/mm/dd〜yyyy/mm/dd */
+  function shortRange(s, e) { return ymd(s) + '〜' + ymd(e); }
 
   // ================================================================ ① プロジェクト一覧
   /** 一覧用の数字は集計キャッシュ（summary_cache）から作る。タスク全件を待たずに描ける */
@@ -957,9 +1041,9 @@
         name: '<a class="nm" data-project="' + esc(p.project_id) + '">' + esc(p.name) + '</a>' +
           (calc.delayed > 0 ? '<span class="lpill">遅延タスク ' + calc.delayed + '</span>' : ''),
         sub: '<span class="k">' + esc(p.key) + '</span> ・ ' + esc(p.template_name || 'テンプレートなし'),
-        sub2: esc(userName(p.owner_user_id) || '—') + (la.at ? ' ・ ' + esc(shortStamp(la.at, la.name)) : ''),
+        sub2: esc(userName(p.owner_user_id) || '—') + (la.at ? ' ・ <span class="upd-at">' + esc(shortStamp(la.at, la.name)) + '</span>' : ''),
         st: badge(calc.health), prog: progBar(calc),
-        due: dueText(calc) + (p.end_date ? '<div class="faint mono" style="font-size:11.5px">〜' + md(p.end_date) + '</div>' : ''),
+        due: dueWithDate(calc, p.end_date),
         who: assignee(p.owner_user_id),
         upd: la.at ? '<span title="' + esc(la.what || 'プロジェクトの設定') + '">' + updHtml(la.at, la.name) + '</span>' : updHtml('', '')
       });
@@ -1021,7 +1105,8 @@
     if (tree) tree.children.forEach(function (t) { subTotal += t.children.length; subDone += t.calc.doneCount; });
     var lateN = tree ? H.flatten(tree).filter(function (r) { return r.calc.health === 'delayed'; }).length : (projCalc(p).delayed || 0);
     var a = Math.round((c.actualRate || 0) * 100), pl = Math.round((c.plannedRate || 0) * 100);
-    var note = c.health === 'done' ? '完了しています' : (pl > a ? '予定 ' + pl + '% より ' + (pl - a) + 'pt 遅れ' : '予定 ' + pl + '% どおり');
+    // 簡易版は進捗率で遅れを判定しない（§3.3）。差を「遅れ」と言い切らず、予定の値だけ並べて人が見て判断する
+    var note = c.health === 'done' ? '完了しています' : (!showPlanned() || c.plannedRate === null || c.plannedRate === undefined ? '' : '進捗 ' + a + '% ／ 予定 ' + pl + '%');
     var views = [['overview', '概要'], ['board', 'ボード'], ['list', 'リスト'], ['gantt', 'ガント']];
     var la = latestText(p);
     return '<div class="ph">' +
@@ -1030,8 +1115,8 @@
       '<div class="meta"><span class="mono">' + esc(p.key) + '</span><span>' + esc(p.template_name || 'テンプレートなし') + '</span>' +
         '<span>オーナー ' + esc(userName(p.owner_user_id) || '—') + '</span>' + (la ? '<span>' + esc(la) + '</span>' : '') + '</div>' +
       '<div class="mx">' +
-        '<div><span class="k">進捗（｜は予定）</span>' + progBar(c) + '<span class="note">' + note + '</span></div>' +
-        '<div><span class="k">期限</span><span class="v">' + (p.end_date ? md(p.end_date) : '—') + '<small>' + dueText(c).replace(/<[^>]+>/g, '') + '</small></span></div>' +
+        '<div><span class="k">' + progLabel() + '</span>' + progBar(c) + '<span class="note">' + note + '</span></div>' +
+        '<div><span class="k">期限</span><span class="v">' + (p.end_date ? ymd(p.end_date) : '—') + '<small>' + dueText(c).replace(/<[^>]+>/g, '') + '</small></span></div>' +
         '<div><span class="k">タスク完了</span><span class="v">' + (tree ? c.doneCount + '/' + c.childCount : '—') + '<small>' + (subTotal ? '子 ' + subDone + '/' + subTotal : '') + '</small></span></div>' +
         '<div><span class="k">遅延</span><span class="v' + (lateN ? ' late' : '') + '">' + lateN + '<small>件</small></span></div>' +
       '</div>' +
@@ -1076,7 +1161,7 @@
         (late.length ? '<span class="badge delayed"><i aria-hidden="true">!</i>' + late.length + '</span>' : '') + '</div>' +
       (late.length
         ? '<div class="alist">' + late.map(function (r) {
-            return '<a data-edit="' + esc(r.node.item_id) + '"><b>' + (Number(r.node.level) === 2 ? '└ ' : '') + esc(r.node.name) + '</b>' + dueText(r.calc) +
+            return '<a data-edit="' + esc(r.node.item_id) + '"><b>' + (Number(r.node.level) === 2 ? '└ ' : '') + esc(r.node.name) + '</b>' + dueWithDate(r.calc, r.node.end_date, true) +
               '<span class="s">' + esc(userName(r.node.assignee_user_id) || '未アサイン') + ' ・ 進捗 ' + H.pct(r.calc.actualRate) + '</span></a>';
           }).join('') + '</div>'
         : emptyBox('遅れているタスクはありません')) + '</section>';
@@ -1143,7 +1228,8 @@
         '<div class="top">' + typeChip(x.item_type) + '<span class="mono">' + esc(x.item_key) + '</span><span class="spacer"></span>' + badge(calc.health) + '</div>' +
         '<div class="t">' + (phone ? '<a data-edit="' + esc(x.item_id) + '" style="color:inherit">' + esc(x.name) + '</a>' : esc(x.name)) + '</div>' +
         (parent ? '<div class="par">└ ' + esc(parent.name) + '</div>' : '') +
-        '<div class="foot">' + assignee(x.assignee_user_id) + '<span class="spacer"></span>' + dueText(calc) + '</div>' + progBar(calc) +
+        (depIds(x).length ? '<div class="dline">' + depChips(x) + '</div>' : '') +
+        '<div class="foot">' + assignee(x.assignee_user_id) + '<span class="spacer"></span>' + dueWithDate(calc, x.end_date, true) + '</div>' + progBar(calc) +
         (phone ? '<div class="acts"><button type="button" class="btn sm" data-edit="' + esc(x.item_id) + '">開く</button>' +
           '<button type="button" class="btn sm" data-move="' + esc(x.item_id) + '">' + ic('move', 15) + '移動</button></div>' : '') +
       '</div>';
@@ -1298,7 +1384,7 @@
     var rows = by[tab].map(function (m) {
       var n = m.node, rate = Math.round(m.calc.actualRate * 100);
       return '<div class="mt">' +
-        '<div class="r-name"><div class="t">' + typeChip(n.item_type) + '<a class="nm" data-edit="' + esc(n.item_id) + '">' + esc(n.name) + '</a></div>' +
+        '<div class="r-name"><div class="t">' + typeChip(n.item_type) + '<a class="nm" data-edit="' + esc(n.item_id) + '">' + esc(n.name) + '</a>' + depChips(n) + '</div>' +
           '<div class="r-sub"><span class="k">' + esc(n.item_key) + '</span> ・ ' + esc(m.project.name) +
           (n.start_date && n.end_date ? ' ・ <span class="mono">' + shortRange(n.start_date, n.end_date) + '</span>' : '') + '</div></div>' +
         '<select class="qs" data-status="' + esc(n.item_id) + '" aria-label="ステータス">' +
@@ -1307,7 +1393,7 @@
           '<button type="button" data-rstep="' + esc(n.item_id) + ':-10" aria-label="10%減らす">−10</button>' +
           '<b data-rate="' + esc(n.item_id) + '">' + rate + '%</b>' +
           '<button type="button" data-rstep="' + esc(n.item_id) + ':10" aria-label="10%増やす">＋10</button></div>' +
-        '<div class="r-due">' + dueText(m.calc) + '</div>' +
+        '<div class="r-due">' + dueWithDate(m.calc, n.end_date) + '</div>' +
       '</div>';
     }).join('');
     return head(title, sub, acts) + bucketSeg(by, tab, 'minetab') +
@@ -1599,6 +1685,21 @@
     [['s-pj', 'pj'], ['s-who', 'who'], ['s-status', 'status']].forEach(function (x) {
       var el = $(x[0]);
       if (el) el.addEventListener('change', function () { searchState[x[1]] = this.value; render(); });
+    });
+
+    // ⑮ 設定（表示）：スイッチを押したらその場で保存し、全画面に反映
+    var spSw = $('st-show_planned');
+    if (spSw) spSw.addEventListener('change', function () {
+      var on = this.checked, sw = this, prev = S.settings.show_planned;
+      sw.disabled = true;
+      S.settings.show_planned = on ? 'TRUE' : 'FALSE';   // 見本はすぐ切り替える
+      beginSave('settings');
+      google.script.run.withSuccessHandler(function (s) {
+        endSave('settings'); S.settings = s; render();
+        doneToast('今日時点の予定を' + (on ? '表示する' : '表示しない') + 'ようにしました（全員）');
+      }).withFailureHandler(function (err) {
+        endSave('settings'); S.settings.show_planned = prev; render(); fail(err);
+      }).saveSettings({ show_planned: on ? 'TRUE' : 'FALSE' });
     });
 
     // ⑮ 設定（お知らせ）の保存
@@ -2396,7 +2497,7 @@
     if (endEl) { endEl.value = last; endEl.disabled = true; }
     if (auto) auto.hidden = false;
     if (help) help.textContent = 'テンプレートのいちばん後ろのタスクから自動で決まります';
-    box.innerHTML = '<div class="card-head"><h2>作られるタスク</h2><span class="count">' + tplItems.length + ' 件 ・ 終了 ' + md(last) + '</span></div>' + rows;
+    box.innerHTML = '<div class="card-head"><h2>作られるタスク</h2><span class="count">' + tplItems.length + ' 件 ・ 終了 ' + ymd(last) + '</span></div>' + rows;
   }
 
   var tplReq = 0;   // 続けて選び直したとき、古い応答で上書きしないための番号
@@ -2593,6 +2694,7 @@
             }).join('') + '</div>' +
           '<input type="hidden" id="t-rate" value="' + (hasKids ? '' : rate) + '">' +
           '<p class="help">' + (hasKids ? '<b>子タスクを持つので入力できません。</b>子 ' + kids.length + ' 件の平均になります' : '状態の判定には使いません。完了にすると100%になります') + '</p></div>' +
+        '<div class="field"><label>' + ic('link', 14) + ' つながり（前後のタスク）</label><div id="t-deps"></div></div>' +
         '<div class="field"><label for="t-desc">説明</label><textarea id="t-desc">' + esc(item.description || '') + '</textarea></div>' +
         (!isNew && Number(item.level) === 1
           ? '<div class="field"><label>子タスク <span class="mono faint">' + kids.length + '件</span></label><div class="fam-list">' +
@@ -2608,12 +2710,81 @@
       '</div>');
 
     if (isNew || !isPhone()) $('t-name').focus();
+    // つながり：前のタスクを選ぶ・外す。日付を変えたら「日程が前後」の注意も出し直す
+    var deps = depIds(item).slice();
+    var depBox = $('t-deps');
+    var drawDeps = function () {
+      var parentId = isNew ? ($('t-parent') ? $('t-parent').value : '') : item.parent_item_id;
+      depBox.innerHTML = depEditorHtml(item, deps, parentId, $('t-start').value, $('t-end').value);
+    };
+    depBox.addEventListener('change', function (e) {
+      if (e.target.id !== 't-dep-add' || !e.target.value) return;
+      deps.push(e.target.value); drawDeps();
+    });
+    depBox.addEventListener('click', function (e) {
+      var del = e.target.closest('[data-depdel]');
+      if (del) { deps = deps.filter(function (d) { return d !== del.getAttribute('data-depdel'); }); drawDeps(); return; }
+      var fit = e.target.closest('[data-depfit]');
+      if (fit) {
+        var s0 = $('t-start').value, e0 = $('t-end').value, ns = fit.getAttribute('data-depfit');
+        var len = s0 && e0 ? H.diffDays(s0, e0) : 0;
+        $('t-start').value = ns; $('t-end').value = H.addDays(ns, len);
+        $('t-end').dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    if ($('t-parent')) $('t-parent').addEventListener('change', function () {
+      deps = deps.filter(function (d) { return d !== $('t-parent').value; }); drawDeps();
+    });
+    drawDeps();
+    $('t-save').__deps = function () { return deps.slice(); };
     $('t-cancel').onclick = closeModal;
     if ($('t-del')) $('t-del').onclick = function () { removeTask(item, kids.length); };
     $('t-save').onclick = function () { saveTask(item, isNew, hasKids); };
     ['t-start', 't-end'].forEach(function (id) {
-      $(id).addEventListener('change', function () { fixPair(id); $('t-span').textContent = spanText($('t-start').value, $('t-end').value); });
+      $(id).addEventListener('change', function () { fixPair(id); $('t-span').textContent = spanText($('t-start').value, $('t-end').value); drawDeps(); });
     });
+  }
+
+  /** 自分より後ろにつながっているタスク（たどれる全部）。これらを前のタスクにすると輪になる */
+  function succDeep(id) {
+    var out = {}, stack = [id];
+    while (stack.length) {
+      var cur = stack.pop();
+      succOf(cur).forEach(function (x) { if (!out[x.item_id]) { out[x.item_id] = true; stack.push(x.item_id); } });
+    }
+    return out;
+  }
+  function depEditorHtml(item, deps, parentId, start, end) {
+    var id = item.item_id;
+    var after = id ? succDeep(id) : {};
+    var cands = itemsOf(item.project_id).filter(function (x) {
+      return x.item_id !== id && x.item_id !== parentId && !(id && x.parent_item_id === id) && deps.indexOf(x.item_id) < 0 && !after[x.item_id];
+    });
+    var line = function (x, removable) {
+      return '<div class="dep-it"><a data-edit="' + esc(x.item_id) + '">' + esc(x.name) + '</a>' +
+        '<span class="mono faint">' + (x.end_date ? (removable ? '〜' + md(x.end_date) : md(x.start_date) + '〜') : '') + '</span>' + badge(H.evaluate(x, [], S.today).health) +
+        (removable ? '<button type="button" class="dep-x" data-depdel="' + esc(x.item_id) + '" aria-label="「' + esc(x.name) + '」を外す">' + ic('close', 14) + '</button>' : '') + '</div>';
+    };
+    var preds = deps.map(itemById).filter(Boolean);
+    var info = depInfo({ depends_on: deps, status: $('t-status') ? $('t-status').value : item.status }, start);
+    var warn = '';
+    if (info.clash.length) {
+      var last = info.clash.reduce(function (m, p) { return p.end_date > m ? p.end_date : m; }, '');
+      var ns = H.addDays(last, 1);
+      warn = '<div class="dep-warn">前のタスク「' + esc(info.clash[0].name) + '」' + (info.clash.length > 1 ? 'ほか' : '') + 'が終わる ' + md(last) + ' より前に始まる予定です' +
+        '<button type="button" class="btn sm" data-depfit="' + ns + '">' + md(ns) + ' 開始にずらす（期間はそのまま）</button></div>';
+    }
+    var succ = id ? succOf(id) : [];
+    return '<div class="dep-sec"><div class="dep-h">前のタスク<span>これが終わってから始める</span></div>' +
+        preds.map(function (x) { return line(x, true); }).join('') +
+        (cands.length
+          ? '<select id="t-dep-add" aria-label="前のタスクを選ぶ"><option value="">＋ 前のタスクを選ぶ</option>' +
+              cands.map(function (x) { return '<option value="' + esc(x.item_id) + '">' + (Number(x.level) === 2 ? '　└ ' : '') + esc(x.name) + (x.end_date ? '（〜' + md(x.end_date) + '）' : '') + '</option>'; }).join('') + '</select>'
+          : (preds.length ? '' : '<p class="help">選べるタスクがありません</p>')) +
+        warn + '</div>' +
+      (succ.length
+        ? '<div class="dep-sec"><div class="dep-h">後のタスク<span>これの完了を待っている</span></div>' + succ.map(function (x) { return line(x, false); }).join('') + '</div>'
+        : '');
   }
 
   function rateCls(v, rate) { return rate === v ? 'active' : (rate !== null && v < rate ? 'f' : ''); }
@@ -2754,6 +2925,7 @@
       progress_rate: hasKids ? null : Number($('t-rate').value || 0)
     };
     var btn = $('t-save');
+    if (btn.__deps) payload.depends_on = btn.__deps();
     btn.disabled = true; btn.textContent = isNew ? '追加しています…' : '保存しています…';
     var key = isNew ? 'new' : item.item_id;
     beginSave(key);
@@ -2791,6 +2963,7 @@
     runServer('deleteItem', item.item_id, kidCount > 0).then(function (r) {
       endSave(item.item_id);
       S.items = (S.items || []).filter(function (x) { return r.ids.indexOf(x.item_id) < 0; });
+      S.items.forEach(function (x) { if (Array.isArray(x.depends_on)) x.depends_on = x.depends_on.filter(function (d) { return r.ids.indexOf(d) < 0; }); });
       applySummary(r.summary);
       closeModal();
       render();
@@ -2853,7 +3026,8 @@
         '<p class="help" style="margin-top:12px"><b>2番目が要点です。</b>進捗率を見ずに判定するので、担当者が％を更新しないまま放置しても、終了日を過ぎれば必ず赤くなります。親の状態は親自身の終了日で判定し、配下の遅延は「配下 n」として別に出します。</p>') +
       card('予定進捗率',
         '<div class="formula">予定進捗率 ＝（今日 − 開始日 ＋ 1）÷（終了日 − 開始日 ＋ 1）<br>0%〜100% に収める</div>' +
-        '<p class="help" style="margin-top:10px">「今日の時点で本来どこまで進んでいるはずか」です。<b>状態の判定には使いません。</b>進捗バーの縦線で見る参考の数字です。</p>') +
+        '<p class="help" style="margin-top:10px">「今日の時点で本来どこまで進んでいるはずか」です。<b>状態の判定には使いません。</b>進捗バーの縦線で見る参考の数字です。' +
+          '縦線と予定％を出すかどうかは、管理者が「設定 ▸ 表示」で全員分まとめて切り替えます（いまは' + (showPlanned() ? '表示' : '非表示') + '）。</p>') +
       card('実績進捗率（手入力）',
         '<p>子タスクを持たないタスクは、担当者が入れた％をそのまま使います。未入力は0%。完了にすると自動で100%。</p>' +
         '<p>子タスクを持つタスクとプロジェクトは、<b>子の単純平均</b>です（手入力できません）。</p>' +
@@ -2877,14 +3051,29 @@
   }
 
   // ================================================================ ⑮ 設定：お知らせの種類・権限・共通マスタ
-  var SETTINGS_TABS = [{ k: 'notify', label: 'お知らせ' }, { k: 'roles', label: '権限' }, { k: 'common', label: '共通マスタ' }];
+  var SETTINGS_TABS = [{ k: 'display', label: '表示' }, { k: 'notify', label: 'お知らせ' }, { k: 'roles', label: '権限' }, { k: 'common', label: '共通マスタ' }];
   function viewSettings() {
-    var tab = SETTINGS_TABS.some(function (t) { return t.k === S.settingsTab; }) ? S.settingsTab : 'notify';
+    var tab = SETTINGS_TABS.some(function (t) { return t.k === S.settingsTab; }) ? S.settingsTab : 'display';
     var seg = '<div class="seg" role="tablist" aria-label="設定の区分">' + SETTINGS_TABS.map(function (t) {
       return '<button type="button" data-stab="' + t.k + '" class="' + (t.k === tab ? 'active' : '') + '">' + t.label + '</button>';
     }).join('') + '</div>';
-    var body = tab === 'roles' ? settingsRolesBody() : tab === 'common' ? settingsCommonBody() : settingsNotifyBody();
-    return head('設定', 'お知らせの種類・権限・共通マスタとのつながり', '') + seg + body;
+    var body = tab === 'roles' ? settingsRolesBody() : tab === 'common' ? settingsCommonBody() : tab === 'notify' ? settingsNotifyBody() : settingsDisplayBody();
+    return head('設定', '表示・お知らせの種類・権限・共通マスタとのつながり', '') + seg + body;
+  }
+
+  /** 表示：全員分まとめて切り替える。押したら即保存（管理者だけ） */
+  function settingsDisplayBody() {
+    var isAdmin = S.me && S.me.role === 'admin';
+    return '<section class="card clip">' +
+      '<div class="card-head"><p class="help">ここでの切り替えは<b>全員の画面</b>に効きます。' + (isAdmin ? '' : 'この内容を変えられるのは管理者だけです。いまは閲覧のみです。') + '</p></div>' +
+      '<div class="setl">' +
+        '<div><label class="tx" for="st-show_planned"><b>今日時点の予定を表示する</b>' +
+          '<small>進捗バーに縦線（今日の時点で本来どこまで進んでいるはずか）を重ね、「進捗 X% ／ 予定 Y%」と並べます。状態（遅延など）の判定には使いません。オフにすると、進捗バーは実績の％だけになります</small></label>' +
+          '<input type="checkbox" class="switch" id="st-show_planned"' + (showPlanned() ? ' checked' : '') + (isAdmin ? '' : ' disabled') + '></div>' +
+      '</div>' +
+      '<div class="card-body" style="border-top:1px solid var(--line2)"><p class="help">見本：</p>' +
+        '<div style="max-width:320px;margin-top:6px">' + progBar({ health: 'on_track', actualRate: 0.3, plannedRate: 0.55 }) + '</div></div>' +
+    '</section>';
   }
 
   function settingsNotifyBody() {
