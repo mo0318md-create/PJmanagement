@@ -21,7 +21,7 @@
     today: '', me: null, users: [], projects: [], summary: {}, templates: [], settings: {},
     items: null,              // null = まだ読み込み中
     view: 'projects', projectId: null, tab: 'overview',
-    collapsed: {}, unread: 0,
+    expanded: {}, unread: 0,   // 開いている親タスク。子タスクは既定で閉じる
     // ① 一覧の絞り込み（F-3-3）と並び順（F-3-4）
     pf: { health: '', lateIn: '', owner: '', tpl: '', sort: 'delayed', done: false }, pfOpen: false,
     // ③ 概要の絞り込み（F-3-9）
@@ -315,7 +315,7 @@
     var sub = t.closest('[data-addsub]');
     if (sub) { openSubTaskEditor(sub.getAttribute('data-addsub')); return; }
     var tg = t.closest('[data-toggle]');
-    if (tg) { var k = tg.getAttribute('data-toggle'); S.collapsed[k] = !S.collapsed[k]; render(); return; }
+    if (tg) { var k = tg.getAttribute('data-toggle'); S.expanded[k] = !kidsOpen(k); render(); return; }
     if (t.closest('[data-collapse-all]')) { collapseAll(); return; }
     var pgtoggle = t.closest('[data-pgtoggle]');
     if (pgtoggle && !t.closest('a, [data-gtap], [data-gbar]')) { var pk = pgtoggle.getAttribute('data-pgtoggle'); S.portfolioOpen[pk] = !S.portfolioOpen[pk]; render(); return; }
@@ -354,7 +354,8 @@
     var fl = t.closest('[data-sflag]');
     if (fl) {
       var f = fl.getAttribute('data-sflag');
-      if (f === 'df.delayedOnly') S.df.delayedOnly = !S.df.delayedOnly; else S[f] = !S[f];
+      // 「遅延だけ表示」を切り替えたら開閉は既定に戻す（オンのときは遅れた子が見えるよう開く）
+      if (f === 'df.delayedOnly') { S.df.delayedOnly = !S.df.delayedOnly; S.expanded = {}; } else S[f] = !S[f];
       render(); return;
     }
     // マイタスク：進捗率を10%ずつ
@@ -1150,11 +1151,11 @@
     tree.children.forEach(function (t) {
       var kids = t.children.filter(function (s) { return !S.df.delayedOnly || s.calc.health === 'delayed'; });
       if (S.df.delayedOnly && t.calc.health !== 'delayed' && !kids.length) return;
-      var open = !S.collapsed[t.node.item_id] && kids.length > 0;
+      var open = kidsOpen(t.node.item_id) && kids.length > 0;
       rows += treeRow(t, 1, open ? 'par' : '');
       if (open) kids.forEach(function (s, i) { rows += treeRow(s, 2, 'kid' + (i === kids.length - 1 ? ' last' : '')); });
     });
-    var anyOpen = tree.children.some(function (t) { return !S.collapsed[t.node.item_id]; });
+    var anyOpen = tree.children.some(function (t) { return t.children.length && kidsOpen(t.node.item_id); });
 
     var late = H.flatten(tree).filter(function (r) { return r.calc.health === 'delayed'; });
     var alert = '<section class="card clip' + (late.length ? ' first' : '') + '"><div class="card-head"><h2>要対応</h2>' +
@@ -1188,12 +1189,15 @@
       '</div><div class="ov-side">' + alert + feed + customFieldsCard(p) + '</div></div>';
   }
 
+  /** 子タスクを開いているか。既定は閉じる。「遅延だけ表示」のときは、遅れた子が見えるよう開く */
+  function kidsOpen(id) { return S.expanded[id] !== undefined ? !!S.expanded[id] : !!S.df.delayedOnly; }
+
   function collapseAll() {
     var p = project(S.projectId);
     if (!p) return;
     var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
-    var anyOpen = tree.children.some(function (t) { return !S.collapsed[t.node.item_id]; });
-    tree.children.forEach(function (t) { S.collapsed[t.node.item_id] = anyOpen; });
+    var anyOpen = tree.children.some(function (t) { return t.children.length && kidsOpen(t.node.item_id); });
+    tree.children.forEach(function (t) { S.expanded[t.node.item_id] = !anyOpen; });
     render();
   }
 
@@ -1202,7 +1206,7 @@
     var node = n.node;
     var acts = '';
     if (level === 1) {
-      var nk = n.children.length, closed = !!S.collapsed[node.item_id];
+      var nk = n.children.length, closed = !kidsOpen(node.item_id);
       if (nk) acts += '<button type="button" class="kbtn" data-toggle="' + esc(node.item_id) + '" aria-expanded="' + !closed + '">' +
         ic(closed ? 'right' : 'down', 14) + '子タスク ' + nk + '件' +
         (n.calc.delayedInside > 0 ? '<span class="late">・遅延 ' + n.calc.delayedInside + '</span>' : '') + '</button>';
@@ -2944,6 +2948,8 @@
     if (isNew) {
       payload.project_id = item.project_id;
       payload.parent_item_id = $('t-parent') ? $('t-parent').value : '';
+      // 子タスクを足したら、足した子が見えるよう親を開く
+      if (payload.parent_item_id) S.expanded[payload.parent_item_id] = true;
       runServer('addItem', payload).then(function (r) { done(r, '追加しました'); }, ng);
     } else {
       payload.item_id = item.item_id;
