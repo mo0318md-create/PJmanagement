@@ -949,10 +949,11 @@
       var c = r.calc || {};
       if (r.kind === 'group' || r.kind === 'sub') {
         return '<div class="gm-grp"' + (r.attrs || '') + '>' +
-            (r.kind === 'group' ? '<span class="g-caret">' + ic(r.open ? 'down' : 'right', 14) + '</span>' : '') +
-            '<span style="min-width:0;overflow-wrap:anywhere">' + esc(r.name) + '</span>' + (r.badgeHtml || '') +
-            '<span class="spacer"></span>' + (r.startDate ? '<span class="mono faint" style="font-size:11.5px;font-weight:400;white-space:nowrap">' + shortRange(r.startDate, r.endDate) + '</span>' : '') +
-            (r.dragProject ? '<a class="btn sm" data-project="' + esc(r.dragProject) + '">開く</a>' : '') +
+            '<div class="gm-gt">' + (r.kind === 'group' ? '<span class="g-caret">' + ic(r.open ? 'down' : 'right', 14) + '</span>' : '') +
+              '<span class="gm-gn">' + esc(r.name) + '</span>' +
+              (r.dragProject ? '<a class="btn sm" data-project="' + esc(r.dragProject) + '">開く</a>' : '') + '</div>' +
+            ((r.badgeHtml || r.startDate) ? '<div class="gm-gm">' + (r.badgeHtml || '') +
+              (r.startDate ? '<span class="mono">' + shortRange(r.startDate, r.endDate) + '</span>' : '') + '</div>' : '') +
           '</div>' +
           (r.dragProject ? '<div class="gm-row">' + track(r.startDate, r.endDate, c, 'project:' + r.dragProject) + '</div>' : '');
       }
@@ -1124,7 +1125,7 @@
         kind: 'group', name: p.key + ' ' + p.name, open: open,
         startDate: p.start_date, endDate: p.end_date, calc: c, dragProject: p.project_id,
         attrs: ' data-pgtoggle="' + esc(p.project_id) + '"',
-        badgeHtml: ' ' + badge(c.health) + (c.delayedInside > 0 ? ' <span class="late" style="font-size:12px">配下 ' + c.delayedInside + '</span>' : ''),
+        badgeHtml: ' ' + badge(c.health) + (c.delayedInside > 0 ? ' <span class="lpill">遅延タスク ' + c.delayedInside + '</span>' : ''),
         metaHtml: (p.start_date && p.end_date ? shortRange(p.start_date, p.end_date) : '期間未設定') + ' ・ 進捗 ' + H.pct(c.actualRate) +
           ' ・ <a data-project="' + esc(p.project_id) + '">開く</a>'
       });
