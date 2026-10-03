@@ -1200,8 +1200,10 @@
       var kids = t.children.filter(function (s) { return !S.df.delayedOnly || s.calc.health === 'delayed'; });
       if (S.df.delayedOnly && t.calc.health !== 'delayed' && !kids.length) return;
       var open = kidsOpen(t.node.item_id) && kids.length > 0;
-      rows += treeRow(t, 1, open ? 'par' : '');
-      if (open) kids.forEach(function (s, i) { rows += treeRow(s, 2, 'kid' + (i === kids.length - 1 ? ' last' : '')); });
+      // 親タスクとその子タスクを1つの枠にまとめる（枠と枠の間はすき間で区切る）
+      var fam = treeRow(t, 1, open ? 'par' : '');
+      if (open) kids.forEach(function (s, i) { fam += treeRow(s, 2, 'kid' + (i === kids.length - 1 ? ' last' : '')); });
+      rows += '<div class="fam">' + fam + '</div>';
     });
     var anyOpen = tree.children.some(function (t) { return t.children.length && kidsOpen(t.node.item_id); });
 
@@ -1231,7 +1233,7 @@
           '<button type="button" class="chip' + (S.df.delayedOnly ? ' on' : '') + '" data-sflag="df.delayedOnly" aria-pressed="' + S.df.delayedOnly + '">遅延だけ表示</button>' +
           '<button type="button" class="chip" data-collapse-all>' + (anyOpen ? 'すべて折りたたむ' : 'すべて開く') + '</button>' +
           '<span class="spacer"></span><span class="count">タスク ' + tree.calc.childCount + ' 件</span></div>' +
-        '<div class="rows">' + (rows ? rowHead('タスク') + rows
+        '<div class="rows fams">' + (rows ? rowHead('タスク') + rows
           : emptyBox(S.df.delayedOnly ? '遅れているタスクはありません' : 'タスクがありません',
               S.df.delayedOnly ? '' : '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>' +
       '</div><div class="ov-side">' + alert + feed + customFieldsCard(p) + '</div></div>';
