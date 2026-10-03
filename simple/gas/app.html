@@ -76,6 +76,8 @@
         S.booted = true;
         renderNav();
         applyInitialRoute();               // URLで指定された画面を開く
+        replaceUrl();                      // 最初の画面にも「戻る」で使う状態を持たせる
+        try { google.script.history.setChangeHandler(onHistory); } catch (e) { /* 履歴が使えなくても画面は動く */ }
         if (S.items !== null) openPendingTask();
         if (S.peopleNote) toast(S.peopleNote, S.peopleSource !== 'common');
       })
@@ -283,7 +285,7 @@
       S.projectId = pid; go('detail'); return;
     }
     var tab = t.closest('[data-tab]');
-    if (tab) { S.tab = tab.getAttribute('data-tab'); render(); window.scrollTo(0, 0); return; }
+    if (tab) { S.tab = tab.getAttribute('data-tab'); render(); window.scrollTo(0, 0); replaceUrl(); return; }
     var ptab = t.closest('[data-ptab]');
     if (ptab) { S.projectsTab = ptab.getAttribute('data-ptab'); render(); return; }
     var petab = t.closest('[data-petab]');
@@ -323,8 +325,8 @@
     var petoggle = t.closest('[data-petoggle]');
     if (petoggle) { var pek = petoggle.getAttribute('data-petoggle'); S.peopleGanttOpen = S.peopleGanttOpen || {}; S.peopleGanttOpen[pek] = !S.peopleGanttOpen[pek]; render(); return; }
     var tplPick = t.closest('[data-tplpick]');
-    if (tplPick) { S.tplSelected = tplPick.getAttribute('data-tplpick'); S.tplDetail = true; render(); return; }
-    if (t.closest('[data-tplback]')) { S.tplDetail = false; renderTemplatesView(); window.scrollTo(0, 0); return; }
+    if (tplPick) { replaceUrl(); S.tplSelected = tplPick.getAttribute('data-tplpick'); S.tplDetail = true; render(); if (isPhone()) pushUrl(); else replaceUrl(); return; }
+    if (t.closest('[data-tplback]')) { S.tplDetail = false; renderTemplatesView(); window.scrollTo(0, 0); replaceUrl(); return; }
     var tpltab = t.closest('[data-tpltab]');
     if (tpltab) { S.tplTab = tpltab.getAttribute('data-tpltab'); renderTemplatesView(); return; }
     // ① 一覧：上の件数（状態で絞る）・絞り込みの開閉・条件の解除
@@ -389,12 +391,19 @@
     }
   });
   function go(view, opts) {
+    // いまの画面のスクロール位置を履歴に残してから移る（「戻る」で同じ位置に戻すため）
+    // 呼び出し側が S.projectId などを先に書き換えていることがあるので、前の画面は最後に履歴へ書いた状態から作る
+    var silent = opts && opts.silent;
+    var prev = lastRoute;
+    if (!silent && prev) histWrite('replace', Object.assign({}, prev, { y: Math.round(window.scrollY || 0) }));
     S.view = view;
     if (view !== 'detail') S.projectId = null;
     renderNav();
     render();
     window.scrollTo(0, 0);
-    if (!(opts && opts.silent)) pushUrl();
+    if (silent) return;
+    // 同じ画面をもう一度開いたときは積まない（「戻る」が空振りしないように）
+    if (prev && prev.v === S.view && prev.id === (S.projectId || '')) replaceUrl(); else pushUrl();
   }
 
   // ---------------------------------------------------------------- URL（直接アクセス）
@@ -403,14 +412,52 @@
    * GAS のウェブアプリは iframe の中なので、URLの操作は google.script.history を使う。
    * これが無い環境（ローカルで開いたときなど）では何もしない。
    */
-  function pushUrl() {
-    var params = { p: S.view };
-    if (S.view === 'detail' && S.projectId) params.id = S.projectId;
+  /*
+   * 画面を移るたびに履歴を1つ積む（push）。スマホのスワイプやブラウザの「戻る」で、
+   * アプリの外ではなく1つ前の画面へ戻れるように。同じ画面の中の切り替え（タブなど）は積まずに書き換える（replace）。
+   */
+  function routeState() {
+    return { v: S.view, id: S.projectId || '', tab: S.tab || '', mu: S.memberUserId || '',
+      td: S.view === 'templates' && S.tplDetail ? (S.tplSelected || '') : '', y: Math.round(window.scrollY || 0) };
+  }
+  var lastRoute = null;   // 最後に履歴へ書いた状態
+  function histWrite(kind, st) {
+    var params = { p: st.v };
+    if (st.v === 'detail' && st.id) params.id = st.id;
     try {
-      if (window.google && google.script && google.script.history) {
-        google.script.history.replace(null, params);
+      if (window.google && google.script && google.script.history && google.script.history[kind]) {
+        google.script.history[kind](st, params);
       }
     } catch (e) { /* URLを書けなくても画面は動く */ }
+    lastRoute = st;
+  }
+  function histCall(kind) { histWrite(kind, routeState()); }
+  function pushUrl() { histCall('push'); }
+  function replaceUrl() { histCall('replace'); }
+
+  var KNOWN_VIEWS = ['projects', 'detail', 'member', 'mine', 'people', 'search', 'new', 'templates', 'settings', 'rules', 'notifications'];
+  /** 「戻る」「進む」で履歴が動いたとき。積んでおいた状態から画面を描き直す（履歴は積まない） */
+  function onHistory(e) {
+    // 小窓（タスクの編集・その他など）を開いているときの「戻る」は、小窓を閉じるだけにする
+    if (!$('modal').hidden) { closeModal(); pushUrl(); return; }
+    var st = e && e.state;
+    if (!st || !st.v) {
+      var prm = (e && e.location && e.location.parameter) || {};
+      st = { v: prm.p || 'projects', id: prm.id || '' };
+    }
+    var view = KNOWN_VIEWS.indexOf(st.v) >= 0 ? st.v : 'projects';
+    if (view === 'detail' && !project(st.id)) view = 'projects';
+    S.view = view;
+    S.projectId = view === 'detail' ? st.id : null;
+    if (st.tab) S.tab = st.tab;
+    if (st.mu) S.memberUserId = st.mu;
+    if (view === 'templates') { S.tplDetail = !!st.td; if (st.td) S.tplSelected = st.td; }
+    lastRoute = routeState();
+    renderNav();
+    render();
+    var y = st.y || 0;
+    window.scrollTo(0, y);
+    setTimeout(function () { window.scrollTo(0, y); }, 60);   // 描き終わって高さが決まってから合わせ直す
   }
 
   /**
