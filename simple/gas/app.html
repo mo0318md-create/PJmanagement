@@ -166,7 +166,8 @@
     people: '<circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.8-3 3-4.6 5.5-4.6s4.7 1.6 5.5 4.6"/><circle cx="17" cy="10" r="2.4"/><path d="M15.6 14.9c2.1.2 3.7 1.6 4.4 4.1"/>',
     more: '<circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/>',
     tpl: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M4 9.5h16M9.5 9.5V20"/>',
-    gear: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.6M12 17.9v2.6M3.5 12h2.6M17.9 12h2.6M6 6l1.8 1.8M16.2 16.2 18 18M6 18l1.8-1.8M16.2 7.8 18 6"/>',
+    gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+    edit: '<path d="M4 20h4L18.5 9.5a2.12 2.12 0 0 0-3-3L5 17v3z"/><path d="m14 7.5 3 3"/>',
     rule: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.6a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1.1.9-1.1 1.7M12 16.4v.1"/>',
     bell: '<path d="M6.5 16v-5a5.5 5.5 0 0 1 11 0v5l1.5 2h-14z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
@@ -1124,7 +1125,7 @@
       '<div class="views"><div class="seg" role="tablist" aria-label="表示">' + views.map(function (v) {
           return '<button type="button" role="tab" data-tab="' + v[0] + '" aria-selected="' + (tab === v[0]) + '" class="' + (tab === v[0] ? 'active' : '') + '">' + v[1] + '</button>';
         }).join('') + '</div><span class="spacer desk-only"></span>' +
-        '<button type="button" class="btn' + (tab === 'settings' ? ' primary' : '') + '" data-tab="settings" title="プロジェクトの設定" aria-label="プロジェクトの設定">' + ic('gear', 16) + '<span class="desk-only">設定</span></button>' +
+        '<button type="button" class="btn' + (tab === 'settings' ? ' primary' : '') + '" data-tab="settings" title="プロジェクトを編集" aria-label="プロジェクトを編集">' + ic('edit', 16) + '<span class="desk-only">編集</span></button>' +
         (tab === 'settings' ? '' : '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスク</button>') +
       '</div></div>';
   }
@@ -1331,7 +1332,7 @@
     });
     if (!defs.length) return '';
     return '<section class="card"><div class="card-head"><h2>設定項目</h2><span class="spacer"></span>' +
-        '<button type="button" class="btn sm ghost" data-tab="settings">変える</button></div>' +
+        '<button type="button" class="btn sm ghost" data-tab="settings">編集</button></div>' +
       '<div class="card-body"><dl class="fe-dl">' + defs.map(function (d) {
         return '<dt>' + esc(d.label) + '</dt><dd>' + esc(fieldDisplay(d, cf[d.key])) + '</dd>';
       }).join('') + '</dl></div></section>';
@@ -1639,7 +1640,7 @@
         renderPreview();
       }
     }
-    // プロジェクト設定を開いたら、設定項目を描く
+    // プロジェクトの編集を開いたら、設定項目を描く
     if (S.view === 'detail' && S.tab === 'settings' && $('p-custom')) {
       var pj = project(S.projectId);
       if (pj) loadProjectFields(pj);
@@ -2569,7 +2570,7 @@
       });
   }
 
-  // ================================================================ ⑧ プロジェクト設定（頭の歯車から開く）
+  // ================================================================ ⑧ プロジェクトの編集（頭の「編集」から開く）
   function projectSettings(p) {
     return '<section class="card"><div class="card-body" style="max-width:780px">' +
       stampLine(p) +
@@ -2612,7 +2613,7 @@
         Object.keys(r.project).forEach(function (k) { p[k] = r.project[k]; });
         applySummary(r.summary);
         render();
-        doneToast('「' + p.name + '」の設定を保存しました');
+        doneToast('「' + p.name + '」を保存しました');
       })
       .withFailureHandler(function (err) {
         endSave('p:' + p.project_id);
@@ -2631,7 +2632,7 @@
   }
 
   /**
-   * プロジェクト設定の設定項目を描く（F-3-13）。
+   * プロジェクトの編集の、設定項目を描く（F-3-13）。
    * 定義は作成時にテンプレートからコピーしてプロジェクトが持っている。あとでテンプレートを変えても変わらない（F-1-9）。
    */
   function loadProjectFields(p) {
