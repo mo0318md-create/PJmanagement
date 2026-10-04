@@ -2586,11 +2586,11 @@
       (many ? '<div class="tplfind">' + ic('search', 15) + '<input id="n-tplq" type="search" placeholder="テンプレートを名前で探す" aria-label="テンプレートを名前で探す">' +
         '<span class="count" id="n-tplq-n">全 ' + tpls.length + ' 件</span></div>' : '') +
       '<div class="tplcards' + (many ? ' many' : '') + '" role="radiogroup" aria-label="テンプレート">' +
-      '<button type="button" class="tplcard active" data-tplcard="" role="radio" aria-checked="true"><b>使わない</b><small>空のプロジェクト。タスクはあとで足す</small></button>' +
+      '<button type="button" class="tplcard active" data-tplcard="" role="radio" aria-checked="true"><span class="tx"><b>使わない</b><small>空のプロジェクト。タスクはあとで足す</small></span></button>' +
       tpls.map(function (t) {
         var desc = t.description || ('キーの頭 ' + (t.key_prefix || ''));
         return '<button type="button" class="tplcard" data-tplcard="' + esc(t.template_id) + '" data-q="' + esc(String(t.name + ' ' + desc + ' ' + (t.key_prefix || '')).toLowerCase()) + '" role="radio" aria-checked="false">' +
-          '<b>' + esc(t.name) + '</b><small>' + esc(desc) + '</small>' +
+          '<span class="tx"><b>' + esc(t.name) + '</b><small>' + esc(desc) + '</small></span>' +
           (used[t.template_id] ? '<i>使用 ' + used[t.template_id] + '</i>' : '') + '</button>';
       }).join('') +
       '<p class="tplnone" id="n-tplnone" hidden>見つかりません。言葉を短くしてください</p></div></div>';
@@ -2625,12 +2625,12 @@
     var q = e.target.value.trim().toLowerCase(), shown = 0, total = 0, sel = $('n-tpl') ? $('n-tpl').value : '';
     document.querySelectorAll('.tplcards [data-q]').forEach(function (b) {
       total++;
-      var hit = !q || b.getAttribute('data-q').indexOf(q) >= 0 || b.getAttribute('data-tplcard') === sel;
-      b.hidden = !hit;
-      if (hit) shown++;
+      var match = !q || b.getAttribute('data-q').indexOf(q) >= 0;
+      b.hidden = !(match || b.getAttribute('data-tplcard') === sel);
+      if (match) shown++;
     });
     $('n-tplq-n').textContent = q ? shown + ' / ' + total + ' 件' : '全 ' + total + ' 件';
-    $('n-tplnone').hidden = shown > 0;
+    $('n-tplnone').hidden = shown > 0;   // 選んでいるものは出したまま、「見つかりません」も出す
   });
 
   function pickTemplateCard(id) {
