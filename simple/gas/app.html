@@ -2575,15 +2575,28 @@
 
   // ================================================================ ⑨ プロジェクト作成
   function viewNew() {
-    var cards = '<div class="tplcards" role="radiogroup" aria-label="テンプレート">' +
-      S.templates.filter(function (t) { return t.active !== false; }).map(function (t) {
-        return '<button type="button" class="tplcard" data-tplcard="' + esc(t.template_id) + '" role="radio" aria-checked="false">' +
-          '<b>' + esc(t.name) + '</b><small>' + esc(t.description || ('キーの頭 ' + (t.key_prefix || ''))) + '</small></button>';
+    // テンプレートは全部出す。よく使われている順に並べ、多いときは名前で絞り込める欄と、高さを抑えた枠に入れる
+    var used = {};
+    S.projects.forEach(function (p) { if (p.template_id) used[p.template_id] = (used[p.template_id] || 0) + 1; });
+    var tpls = S.templates.filter(function (t) { return t.active !== false; }).sort(function (a, b) {
+      return (used[b.template_id] || 0) - (used[a.template_id] || 0) || String(a.name).localeCompare(String(b.name), 'ja');
+    });
+    var many = tpls.length > 6;
+    var cards = '<div class="tplpick">' +
+      (many ? '<div class="tplfind">' + ic('search', 15) + '<input id="n-tplq" type="search" placeholder="テンプレートを名前で探す" aria-label="テンプレートを名前で探す">' +
+        '<span class="count" id="n-tplq-n">全 ' + tpls.length + ' 件</span></div>' : '') +
+      '<div class="tplcards' + (many ? ' many' : '') + '" role="radiogroup" aria-label="テンプレート">' +
+      '<button type="button" class="tplcard active" data-tplcard="" role="radio" aria-checked="true"><b>使わない</b><small>空のプロジェクト。タスクはあとで足す</small></button>' +
+      tpls.map(function (t) {
+        var desc = t.description || ('キーの頭 ' + (t.key_prefix || ''));
+        return '<button type="button" class="tplcard" data-tplcard="' + esc(t.template_id) + '" data-q="' + esc(String(t.name + ' ' + desc + ' ' + (t.key_prefix || '')).toLowerCase()) + '" role="radio" aria-checked="false">' +
+          '<b>' + esc(t.name) + '</b><small>' + esc(desc) + '</small>' +
+          (used[t.template_id] ? '<i>使用 ' + used[t.template_id] + '</i>' : '') + '</button>';
       }).join('') +
-      '<button type="button" class="tplcard active" data-tplcard="" role="radio" aria-checked="true"><b>使わない</b><small>空のプロジェクト。タスクはあとで足す</small></button></div>';
+      '<p class="tplnone" id="n-tplnone" hidden>見つかりません。言葉を短くしてください</p></div></div>';
     return head('プロジェクトを作成', 'テンプレートを選ぶと、配下のタスクが自動で作られます', '', '<a data-nav="projects">プロジェクト</a> ／ 作成') +
       '<div class="form-grid"><section class="card"><div class="card-body">' +
-        '<div class="field"><label>テンプレート</label>' + cards + '<input type="hidden" id="n-tpl" value=""></div>' +
+        '<div class="field"><label>テンプレート <span class="tplsel" id="n-tplsel">選択中：使わない</span></label>' + cards + '<input type="hidden" id="n-tpl" value=""></div>' +
         '<div class="field"><label for="n-name">プロジェクト名</label><input id="n-name" type="text" placeholder="例：コーポレートサイトリニューアル"></div>' +
         '<div class="row2">' +
           '<div class="field"><label for="n-key">キー</label><input id="n-key" type="text" maxlength="10" placeholder="例：CORP" style="text-transform:uppercase" autocapitalize="characters">' +
@@ -2606,11 +2619,26 @@
   document.addEventListener('change', function (e) {
     if (e.target.id === 'n-start') renderPreview();
   });
+  // テンプレートを名前で絞り込む（選んでいるものと「使わない」は出したまま）
+  document.addEventListener('input', function (e) {
+    if (e.target.id !== 'n-tplq') return;
+    var q = e.target.value.trim().toLowerCase(), shown = 0, total = 0, sel = $('n-tpl') ? $('n-tpl').value : '';
+    document.querySelectorAll('.tplcards [data-q]').forEach(function (b) {
+      total++;
+      var hit = !q || b.getAttribute('data-q').indexOf(q) >= 0 || b.getAttribute('data-tplcard') === sel;
+      b.hidden = !hit;
+      if (hit) shown++;
+    });
+    $('n-tplq-n').textContent = q ? shown + ' / ' + total + ' 件' : '全 ' + total + ' 件';
+    $('n-tplnone').hidden = shown > 0;
+  });
 
   function pickTemplateCard(id) {
     var inp = $('n-tpl');
     if (!inp || inp.value === id) return;
     inp.value = id;
+    var picked = id ? S.templates.filter(function (t) { return t.template_id === id; })[0] : null;
+    if ($('n-tplsel')) $('n-tplsel').textContent = '選択中：' + (picked ? picked.name : '使わない');
     document.querySelectorAll('[data-tplcard]').forEach(function (b) {
       var on = b.getAttribute('data-tplcard') === id;
       b.classList.toggle('active', on);
