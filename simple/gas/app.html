@@ -385,6 +385,7 @@
     if (ds) { var dp = ds.getAttribute('data-dstep').split(':'); stepDate(dp[0], Number(dp[1])); return; }
     var dsh = t.closest('[data-dshift]');
     if (dsh) { var sp = dsh.getAttribute('data-dshift').split(':'), ids = sp[0].split(','); shiftDates(ids[0], ids[1], Number(sp[1])); return; }
+    if (t.closest('[data-tplmore]')) { S.tplLimit = (S.tplLimit || TPL_PAGE) + TPL_PAGE; redrawTplList(); return; }
     var tc = t.closest('[data-tplcard]');
     if (tc) { pickTemplateCard(tc.getAttribute('data-tplcard')); return; }
     if (t.closest('[data-create]')) { createProjectNow(); return; }
@@ -2575,25 +2576,13 @@
 
   // ================================================================ ⑨ プロジェクト作成
   function viewNew() {
-    // テンプレートは全部出す。よく使われている順に並べ、多いときは名前で絞り込める欄と、高さを抑えた枠に入れる
-    var used = {};
-    S.projects.forEach(function (p) { if (p.template_id) used[p.template_id] = (used[p.template_id] || 0) + 1; });
-    var tpls = S.templates.filter(function (t) { return t.active !== false; }).sort(function (a, b) {
-      return (used[b.template_id] || 0) - (used[a.template_id] || 0) || String(a.name).localeCompare(String(b.name), 'ja');
-    });
-    var many = tpls.length > 6;
+    // テンプレートは1列のリスト。よく使われている順に並べ、まず50件だけ描く（多くても開くのが遅くならないように）
+    S.tplQ = ''; S.tplLimit = TPL_PAGE;
+    var total = tplSorted().length;
     var cards = '<div class="tplpick">' +
-      (many ? '<div class="tplfind">' + ic('search', 15) + '<input id="n-tplq" type="search" placeholder="テンプレートを名前で探す" aria-label="テンプレートを名前で探す">' +
-        '<span class="count" id="n-tplq-n">全 ' + tpls.length + ' 件</span></div>' : '') +
-      '<div class="tplcards' + (many ? ' many' : '') + '" role="radiogroup" aria-label="テンプレート">' +
-      '<button type="button" class="tplcard active" data-tplcard="" role="radio" aria-checked="true"><span class="tx"><b>使わない</b><small>空のプロジェクト。タスクはあとで足す</small></span></button>' +
-      tpls.map(function (t) {
-        var desc = t.description || ('キーの頭 ' + (t.key_prefix || ''));
-        return '<button type="button" class="tplcard" data-tplcard="' + esc(t.template_id) + '" data-q="' + esc(String(t.name + ' ' + desc + ' ' + (t.key_prefix || '')).toLowerCase()) + '" role="radio" aria-checked="false">' +
-          '<span class="tx"><b>' + esc(t.name) + '</b><small>' + esc(desc) + '</small></span>' +
-          (used[t.template_id] ? '<i>使用 ' + used[t.template_id] + '</i>' : '') + '</button>';
-      }).join('') +
-      '<p class="tplnone" id="n-tplnone" hidden>見つかりません。言葉を短くしてください</p></div></div>';
+      (total > 6 ? '<div class="tplfind">' + ic('search', 15) + '<input id="n-tplq" type="search" placeholder="テンプレートを名前で探す" aria-label="テンプレートを名前で探す">' +
+        '<span class="count" id="n-tplq-n">全 ' + total + ' 件</span></div>' : '') +
+      '<div class="tplcards' + (total > 6 ? ' many' : '') + '" id="n-tpllist" role="radiogroup" aria-label="テンプレート">' + tplRowsHtml('') + '</div></div>';
     return head('プロジェクトを作成', 'テンプレートを選ぶと、配下のタスクが自動で作られます', '', '<a data-nav="projects">プロジェクト</a> ／ 作成') +
       '<div class="form-grid"><section class="card"><div class="card-body">' +
         '<div class="field"><label>テンプレート <span class="tplsel" id="n-tplsel">選択中：使わない</span></label>' + cards + '<input type="hidden" id="n-tpl" value=""></div>' +
@@ -2619,18 +2608,48 @@
   document.addEventListener('change', function (e) {
     if (e.target.id === 'n-start') renderPreview();
   });
-  // テンプレートを名前で絞り込む（選んでいるものと「使わない」は出したまま）
+  /* ---- 作成画面のテンプレートの一覧（名前で探す・50件ずつ出す） ---- */
+  var TPL_PAGE = 50;
+  /** 有効なテンプレートを、よく使われている順（同数は名前順）に */
+  function tplSorted() {
+    var used = {};
+    S.projects.forEach(function (p) { if (p.template_id) used[p.template_id] = (used[p.template_id] || 0) + 1; });
+    return S.templates.filter(function (t) { return t.active !== false; }).sort(function (a, b) {
+      return (used[b.template_id] || 0) - (used[a.template_id] || 0) || String(a.name).localeCompare(String(b.name), 'ja');
+    });
+  }
+  function tplDesc(t) { return t.description || ('キーの頭 ' + (t.key_prefix || '')); }
+  /** 一覧の中身。「使わない」が先頭、選んでいるものは絞り込んでも出したまま、続きは「さらに 50 件」 */
+  function tplRowsHtml(sel) {
+    var q = (S.tplQ || '').trim().toLowerCase();
+    var all = tplSorted();
+    var hits = q ? all.filter(function (t) { return String(t.name + ' ' + tplDesc(t) + ' ' + (t.key_prefix || '')).toLowerCase().indexOf(q) >= 0; }) : all;
+    var shown = hits.slice(0, S.tplLimit || TPL_PAGE);
+    if (sel && !shown.some(function (t) { return t.template_id === sel; })) {
+      var st = all.filter(function (t) { return t.template_id === sel; })[0];
+      if (st) shown = [st].concat(shown);
+    }
+    var row = function (id, name, desc) {
+      var on = (sel || '') === id;
+      return '<button type="button" class="tplcard' + (on ? ' active' : '') + '" data-tplcard="' + esc(id) + '" role="radio" aria-checked="' + on + '">' +
+        '<span class="tx"><b>' + esc(name) + '</b><small>' + esc(desc) + '</small></span></button>';
+    };
+    var rest = hits.length - Math.min(hits.length, S.tplLimit || TPL_PAGE);
+    var cnt = $('n-tplq-n');
+    if (cnt) cnt.textContent = q ? hits.length + ' / ' + all.length + ' 件' : '全 ' + all.length + ' 件';
+    return row('', '使わない', '空のプロジェクト。タスクはあとで足す') +
+      shown.map(function (t) { return row(t.template_id, t.name, tplDesc(t)); }).join('') +
+      (rest > 0 ? '<button type="button" class="tplmore" data-tplmore>さらに ' + Math.min(rest, TPL_PAGE) + ' 件を表示<small>（残り ' + rest + ' 件）</small></button>' : '') +
+      (q && !hits.length ? '<p class="tplnone">見つかりません。言葉を短くしてください</p>' : '');
+  }
+  function redrawTplList() {
+    var box = $('n-tpllist');
+    if (box) box.innerHTML = tplRowsHtml($('n-tpl') ? $('n-tpl').value : '');
+  }
   document.addEventListener('input', function (e) {
     if (e.target.id !== 'n-tplq') return;
-    var q = e.target.value.trim().toLowerCase(), shown = 0, total = 0, sel = $('n-tpl') ? $('n-tpl').value : '';
-    document.querySelectorAll('.tplcards [data-q]').forEach(function (b) {
-      total++;
-      var match = !q || b.getAttribute('data-q').indexOf(q) >= 0;
-      b.hidden = !(match || b.getAttribute('data-tplcard') === sel);
-      if (match) shown++;
-    });
-    $('n-tplq-n').textContent = q ? shown + ' / ' + total + ' 件' : '全 ' + total + ' 件';
-    $('n-tplnone').hidden = shown > 0;   // 選んでいるものは出したまま、「見つかりません」も出す
+    S.tplQ = e.target.value; S.tplLimit = TPL_PAGE;
+    redrawTplList();
   });
 
   function pickTemplateCard(id) {

@@ -542,7 +542,7 @@ select.qs { width: 100%; min-height: 36px; padding: 0 30px 0 10px; font-size: 13
 .tplfind .count { white-space: nowrap; }
 .tplcards { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
 .tplcards.many { max-height: min(420px, 52vh); overflow-y: auto; overscroll-behavior: contain; }
-.tplcard { flex-shrink: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 9px 14px; text-align: left; border: 0; border-top: 1px solid var(--line2); border-radius: 0; background: var(--surface); color: var(--ink); }
+.tplcard { flex-shrink: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 9px 14px; text-align: left; border: 0; border-top: 1px solid var(--line2); border-radius: 0; background: var(--surface); color: var(--ink); }
 .tplcard:first-child { border-top: 0; }
 .tplcard::before { content: ''; width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--line); background: var(--surface); }
 .tplcard:hover { background: var(--sunken); }
@@ -551,7 +551,9 @@ select.qs { width: 100%; min-height: 36px; padding: 0 30px 0 10px; font-size: 13
 .tplcard .tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .tplcard b { font-size: 14px; overflow-wrap: anywhere; }
 .tplcard small { font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tplcard i { font-style: normal; font-family: var(--f-mono); font-size: 11px; color: var(--ink3); white-space: nowrap; }
+.tplmore { flex-shrink: 0; min-height: 44px; border: 0; border-top: 1px solid var(--line2); background: var(--surface); color: var(--accent); font-size: 13px; font-weight: 700; }
+.tplmore small { font-weight: 400; color: var(--ink3); margin-left: 6px; }
+.tplmore:hover { background: var(--sunken); }
 .tplnone { margin: 0; padding: 14px; text-align: center; color: var(--ink3); font-size: 13px; }
 .tplsel { margin-left: 8px; font-weight: 400; color: var(--accent); font-size: 12.5px; }
 .autoin { position: relative; }
