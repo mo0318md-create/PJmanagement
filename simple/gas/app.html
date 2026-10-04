@@ -734,6 +734,12 @@
     return h;
   }
 
+  /** 件数の表示。label は「全」「表示」など。子タスクが入っていれば内訳を添える */
+  function countHtml(list, label) {
+    var kids = list.filter(function (x) { return Number((x.node || x).level) === 2; }).length;
+    return '<span class="count">' + (label || '全') + ' ' + list.length + ' 件' + (kids ? '<small>（子タスク ' + kids + ' を含む）</small>' : '') + '</span>';
+  }
+
   /** タスクの1行。opts: { pj: プロジェクト名, toggle: 開閉ボタン, extra: 名前の後ろに足すもの, nameHtml: 強調つきの名前 } */
   function taskRow(n, calc, opts) {
     opts = opts || {};
@@ -1332,7 +1338,7 @@
         '<div class="bar">' +
           '<button type="button" class="chip' + (S.df.delayedOnly ? ' on' : '') + '" data-sflag="df.delayedOnly" aria-pressed="' + S.df.delayedOnly + '">遅延だけ表示</button>' +
           '<button type="button" class="chip" data-collapse-all>' + (anyOpen ? 'すべて折りたたむ' : 'すべて開く') + '</button>' +
-          '<span class="spacer"></span><span class="count">タスク ' + tree.calc.childCount + ' 件</span></div>' +
+          '<span class="spacer"></span>' + countHtml(itemsOf(p.project_id)) + '</div>' +
         '<div class="rows fams">' + (rows ? rowHead('タスク') + rows
           : emptyBox(S.df.delayedOnly ? '遅れているタスクはありません' : 'タスクがありません',
               S.df.delayedOnly ? '' : '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>' +
@@ -1394,7 +1400,7 @@
     var bar = '<div class="bar">' +
         '<select class="chip' + (S.boardAssignee ? ' on' : '') + '" id="bd-assignee" aria-label="担当者">' +
           optionList([['', '担当者：すべて']].concat(S.users.map(function (u) { return [u.user_id, '担当者：' + u.name]; })), S.boardAssignee || '') + '</select>' +
-        '<span class="spacer"></span><span class="count">タスク ' + filtered.length + ' 件</span></div>';
+        '<span class="spacer"></span>' + countHtml(filtered, S.boardAssignee ? '表示' : '全') + '</div>';
 
     if (phone) {
       var col = H.STATUS_ORDER.indexOf(S.boardCol) >= 0 ? S.boardCol : 'in_progress';
@@ -1428,14 +1434,16 @@
       groups = ['work', 'bug', 'req'].map(function (t) { return { label: H.TYPE_LABEL[t], rows: flat.filter(function (r) { return r.node.item_type === t; }) }; });
     }
     groups = groups.filter(function (g) { return g.rows.length; });
+    // まとまりの見出しは「種別：作業　4 件」のように、何でまとめたかを書く
+    var prefix = { status: 'ステータス', assignee: '担当者', type: '種別' }[mode];
     var body = groups.map(function (g) {
-      return '<div class="row grp">' + esc(g.label) + '<span class="c">' + g.rows.length + '</span></div>' +
+      return '<div class="row grp"><span><span class="k">' + prefix + '：</span>' + esc(g.label) + '</span><span class="c">' + g.rows.length + ' 件</span></div>' +
         g.rows.map(function (r) { return taskRow(r.node, r.calc, { flat: true }); }).join('');
     }).join('');
     return '<div class="bar"><span class="help">まとめ方</span><div class="seg">' +
         [['status', 'ステータス'], ['assignee', '担当者'], ['type', '種別']].map(function (m) {
           return '<button type="button" data-lgb="' + m[0] + '" class="' + (mode === m[0] ? 'active' : '') + '">' + m[1] + '</button>';
-        }).join('') + '</div><span class="spacer"></span><span class="count">タスク ' + flat.length + ' 件</span></div>' +
+        }).join('') + '</div><span class="spacer"></span>' + countHtml(flat) + '</div>' +
       '<div class="rows">' + (body ? rowHead('タスク') + body
         : emptyBox('タスクがありません', '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>';
   }
@@ -1459,7 +1467,7 @@
     });
     return '<div class="bar">' +
         '<button type="button" class="chip' + (showDone ? ' on' : '') + '" data-sflag="ganttShowDone" aria-pressed="' + showDone + '">完了も表示</button>' +
-        '<span class="spacer"></span><span class="count">タスク ' + rows.length + ' 件</span></div>' +
+        '<span class="spacer"></span>' + countHtml(rows.map(function (r) { return { level: r.level }; }), showDone ? '全' : '表示') + '</div>' +
       ganttBlock(rows, { today: S.today, labelHead: 'タスク（期間）' });
   }
 
