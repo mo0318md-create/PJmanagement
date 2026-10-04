@@ -27,11 +27,11 @@
     // ③ 概要の絞り込み（F-3-9）
     df: { delayedOnly: false },
     // ④ボード・⑤リスト・⑥ガントの表示設定
-    boardAssignee: '', boardCol: 'in_progress', listGroupBy: 'status', ganttScale: 'week', ganttShowDone: true,
+    boardAssignee: '', boardCol: 'in_progress', listGroupBy: 'status', ganttShowDone: true,
     // ⑪担当者一覧の並び順、⑫担当者別ガントの表示設定
     peopleSort: 'delayed', peopleGanttUser: '', peopleGanttGroupByProject: true, peopleGanttShowDone: false,
     // ②全プロジェクトのガント
-    portfolioOpen: {}, portfolioScale: 'month', portfolioOwner: '', portfolioShowDone: false,
+    portfolioOpen: {}, portfolioOwner: '', portfolioShowDone: false,
     // ①一覧／②ガント、⑪一覧／⑫ガント の切替
     projectsTab: 'list', peopleTab: 'list',
     settingsTab: 'display',
@@ -43,6 +43,7 @@
     tplSelected: null, tplTab: 'items', tplDetail: false,
     // スマホのガントで見ている範囲（開始日と日数）
     gw: { start: '', days: 28 },
+    gscale: 'week',   // ガントの目盛り：day / week / month / quarter / fit（全体）。全部のガントで共通
     // 最後に保存が終わった時刻（上の帯に「すべて保存済み 14:03」と出す）
     lastSaved: ''
   };
@@ -339,20 +340,31 @@
     // 切替ボタン（まとめ方・目盛り・ボードの列・スマホのガントの範囲）
     var lgb = t.closest('[data-lgb]');
     if (lgb) { S.listGroupBy = lgb.getAttribute('data-lgb'); render(); return; }
-    var gsc = t.closest('[data-gscale]');
-    if (gsc) { S.ganttScale = gsc.getAttribute('data-gscale'); render(); return; }
-    var pgsc = t.closest('[data-pgscale]');
-    if (pgsc) { S.portfolioScale = pgsc.getAttribute('data-pgscale'); render(); return; }
     var bcol = t.closest('[data-bcol]');
     if (bcol) { S.boardCol = bcol.getAttribute('data-bcol'); render(); return; }
-    var gwn = t.closest('[data-gwnav]');
-    if (gwn) {
-      var dir = Number(gwn.getAttribute('data-gwnav'));
-      S.gw.start = dir === 0 ? weekStart(H.addDays(S.today, -7)) : H.addDays(S.gw.start, dir * (S.gw.days > 60 ? 28 : 14));
+    var gu = t.closest('[data-gunit]');
+    if (gu) {
+      S.gscale = gu.getAttribute('data-gunit');
+      S.gw.start = gwDefaultStart(S.gscale);
+      gForceToday = true;   // 目盛りを変えたら、今日が見える位置から
       render(); return;
     }
-    var gwd = t.closest('[data-gwdays]');
-    if (gwd) { S.gw.days = Number(gwd.getAttribute('data-gwdays')); render(); return; }
+    if (t.closest('[data-gtoday]')) {
+      if (isPhone()) { S.gw.start = gwDefaultStart(S.gscale); render(); }
+      else hScrollers().forEach(scrollToToday);
+      return;
+    }
+    var gwn = t.closest('[data-gwnav]');
+    if (gwn) {
+      var dir = Number(gwn.getAttribute('data-gwnav')), m0 = S.gscale || 'week';
+      var s0 = S.gw.start || gwDefaultStart(m0);
+      if (dir === 0) S.gw.start = gwDefaultStart(m0);
+      else if (m0 === 'day') S.gw.start = H.addDays(s0, dir * 7);
+      else if (m0 === 'month') S.gw.start = addMonths(s0, dir * 3);
+      else if (m0 === 'quarter') S.gw.start = addMonths(quarterStart(s0), dir * 12);
+      else S.gw.start = H.addDays(s0, dir * 28);
+      render(); return;
+    }
     // 表示の切り替え（完了も表示・遅延だけ表示など）
     var fl = t.closest('[data-sflag]');
     if (fl) {
@@ -519,6 +531,7 @@
    * 別の画面・別のタブへ移ったときは保たず、ガントは「今日」が見える位置から始める。
    */
   var scrollKey = '';
+  var gForceToday = false;   // 次の描画で、ガントを今日の位置へ動かす
   var renderDeferred = false;
   function viewKey() { return [S.view, S.projectId, S.tab, S.projectsTab, S.peopleTab, S.memberUserId].join('|'); }
   function hScrollers() { return Array.prototype.slice.call(document.querySelectorAll('#main .gantt-scroll')); }
@@ -535,7 +548,8 @@
     // 指やマウスで押している最中に描き直すと、つかんでいる要素が差し替わって操作が壊れる。離すまで待つ
     if (typeof dg !== 'undefined' && dg) { renderDeferred = true; return; }
     var key = viewKey();
-    var keep = key === scrollKey ? hScrollers().map(function (el) { return el.scrollLeft; }) : null;
+    var keep = key === scrollKey && !gForceToday ? hScrollers().map(function (el) { return el.scrollLeft; }) : null;
+    gForceToday = false;
     renderView();
     renderNav();
     updateFab();
@@ -784,58 +798,112 @@
    * ガント（②全プロジェクト／⑥1プロジェクト内／⑫担当者別／⑬個人ページで共通）
    * ================================================================ */
   /** 日付軸。scale: 'week' 週（月曜）ごと／'month' 月の1日ごと。未指定は期間の長さで自動 */
-  function ganttAxis(min, max, today, scale) {
+  /* ---------------- 目盛り（日・週・月・四半期、全体） ---------------- */
+  var G_UNITS = [['day', '日'], ['week', '週'], ['month', '月'], ['quarter', '四半期'], ['fit', '全体']];
+  var G_PX = { day: 34, week: 14, month: 4.2, quarter: 1.5 };   // PC・タブレットの1日あたりの幅
+  var DOW_JA = '日月火水木金土';
+  function monthStart(iso) { return iso.slice(0, 8) + '01'; }
+  function addMonths(iso, n) { var d = H.parse(monthStart(iso)); return H.toISO(new Date(d.getFullYear(), d.getMonth() + n, 1)); }
+  function quarterStart(iso) { var d = H.parse(iso); return H.toISO(new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1)); }
+  /** 「全体」のときの目盛りの単位。1日あたりの幅から選ぶ */
+  function fitUnit(span, widthPx) {
+    var px = widthPx / span;
+    return px >= 30 ? 'day' : px >= 6 ? 'week' : px >= 1.4 ? 'month' : 'quarter';
+  }
+  /** 単位の区切りに合わせて期間を広げる（端の目盛りが欠けないように） */
+  function snapRange(min, max, unit) {
+    if (unit === 'week') return [weekStart(min), H.addDays(weekStart(max), 6)];
+    if (unit === 'month') return [monthStart(min), H.addDays(addMonths(max, 1), -1)];
+    if (unit === 'quarter') return [quarterStart(min), H.addDays(addMonths(quarterStart(max), 3), -1)];
+    return [min, max];
+  }
+
+  /**
+   * 時間軸。上の段（日・週は「2026年9月」、月・四半期は「2026年」）と、
+   * 下の段（日「28 月」、週「9/21」（週の初日）、月「10月」、四半期「10〜12月」）、縦線、土日の網掛けを返す。
+   */
+  function ganttAxis(min, max, today, unit) {
     var span = H.diffDays(min, max) + 1;
     var pos = function (iso) { return (H.diffDays(min, iso) / span) * 100; };
-    if (scale !== 'week' && scale !== 'month') scale = span <= 120 ? 'week' : 'month';
-
-    var months = [];
-    var cur = min.slice(0, 8) + '01';
-    while (cur <= max) {
-      var d = H.parse(cur);
-      var nextIso = H.toISO(new Date(d.getFullYear(), d.getMonth() + 1, 1));
-      var from = cur < min ? min : cur;
-      var to = nextIso > max ? max : H.addDays(nextIso, -1);
-      months.push({
-        label: (d.getMonth() === 0 ? d.getFullYear() + '年 ' : '') + (d.getMonth() + 1) + '月',
-        left: pos(from), width: ((H.diffDays(from, to) + 1) / span) * 100, odd: months.length % 2 === 1
-      });
-      cur = nextIso;
+    var wid = function (a, b) { return ((H.diffDays(a, b) + 1) / span) * 100; };
+    var clipA = function (a) { return a < min ? min : a; };
+    var clipB = function (b) { return b > max ? max : b; };
+    var top = [], ticks = [], weekends = [], lineAt = {};
+    var addLine = function (iso, cls) {
+      if (iso <= min || iso > max) return;
+      var rank = { day: 1, wk: 2, major: 3 };
+      if (!lineAt[iso] || rank[cls] > rank[lineAt[iso]]) lineAt[iso] = cls;
+    };
+    var yearly = unit === 'month' || unit === 'quarter';
+    for (var cur = yearly ? H.toISO(new Date(H.parse(min).getFullYear(), 0, 1)) : monthStart(min); cur <= max; ) {
+      var next = yearly ? H.toISO(new Date(H.parse(cur).getFullYear() + 1, 0, 1)) : addMonths(cur, 1);
+      var a = clipA(cur), b = clipB(H.addDays(next, -1)), dc = H.parse(cur);
+      top.push({ left: pos(a), width: wid(a, b), label: dc.getFullYear() + '年' + (yearly ? '' : (dc.getMonth() + 1) + '月') });
+      addLine(cur, 'major');
+      cur = next;
     }
-
-    var ticks = [];
-    if (scale === 'week') {
-      var dow = H.parse(min).getDay();
-      var first = H.addDays(min, (8 - (dow === 0 ? 7 : dow)) % 7);
-      for (var iso = first; iso <= max; iso = H.addDays(iso, 7)) {
-        var d1 = H.parse(iso);
-        ticks.push({ left: pos(iso), label: (d1.getMonth() + 1) + '/' + d1.getDate() });
+    var markWeekends = function () {
+      for (var d = min; d <= max; d = H.addDays(d, 1)) {
+        var w = H.parse(d).getDay();
+        if (w === 0 || w === 6) weekends.push({ left: pos(d), width: wid(d, d) });
+      }
+    };
+    if (unit === 'day') {
+      for (var d1 = min; d1 <= max; d1 = H.addDays(d1, 1)) {
+        var x1 = H.parse(d1), w1 = x1.getDay();
+        ticks.push({ left: pos(d1), width: wid(d1, d1), label: String(x1.getDate()), sub: DOW_JA.charAt(w1), c: true, we: w1 === 0 || w1 === 6, today: d1 === today });
+        addLine(d1, w1 === 1 ? 'wk' : 'day');
+      }
+      markWeekends();
+    } else if (unit === 'week') {
+      for (var s = weekStart(min); s <= max; s = H.addDays(s, 7)) {
+        var a2 = clipA(s), b2 = clipB(H.addDays(s, 6)), x2 = H.parse(s);
+        ticks.push({ left: pos(a2), width: wid(a2, b2), label: (x2.getMonth() + 1) + '/' + x2.getDate() });
+        addLine(s, 'wk');
+      }
+      markWeekends();
+    } else if (unit === 'month') {
+      for (var m = monthStart(min); m <= max; m = addMonths(m, 1)) {
+        var a3 = clipA(m), b3 = clipB(H.addDays(addMonths(m, 1), -1));
+        ticks.push({ left: pos(a3), width: wid(a3, b3), label: (H.parse(m).getMonth() + 1) + '月', c: true });
+        addLine(m, 'wk');
       }
     } else {
-      var cur2 = min.slice(0, 8) + '01';
-      if (cur2 < min) cur2 = H.toISO(new Date(H.parse(cur2).getFullYear(), H.parse(cur2).getMonth() + 1, 1));
-      for (; cur2 <= max; cur2 = H.toISO(new Date(H.parse(cur2).getFullYear(), H.parse(cur2).getMonth() + 1, 1))) {
-        var d2 = H.parse(cur2);
-        ticks.push({ left: pos(cur2), label: (d2.getMonth() + 1) + '/' + d2.getDate() });
+      for (var q = quarterStart(min); q <= max; q = addMonths(q, 3)) {
+        var a4 = clipA(q), b4 = clipB(H.addDays(addMonths(q, 3), -1)), mq = H.parse(q).getMonth() + 1;
+        ticks.push({ left: pos(a4), width: wid(a4, b4), label: mq + '〜' + (mq + 2) + '月', c: true });
+        addLine(q, 'wk');
+        addLine(addMonths(q, 1), 'day'); addLine(addMonths(q, 2), 'day');
       }
     }
-    return { span: span, pos: pos, months: months, ticks: ticks, scale: scale,
+    var lines = Object.keys(lineAt).map(function (iso) { return { left: pos(iso), cls: lineAt[iso] }; });
+    return { span: span, pos: pos, top: top, ticks: ticks, lines: lines, weekends: weekends, unit: unit,
       todayPos: (today >= min && today <= max) ? pos(today) : null };
   }
 
   function ganttGridLines(axis) {
-    var out = axis.ticks.map(function (t) { return '<div class="g-line" style="left:' + t.left.toFixed(2) + '%"></div>'; });
-    axis.months.forEach(function (m, i) {
-      if (i > 0) out.push('<div class="g-line month" style="left:' + m.left.toFixed(2) + '%"></div>');
-    });
-    return out.join('');
+    return axis.weekends.map(function (w) { return '<div class="g-we" style="left:' + w.left.toFixed(3) + '%;width:' + w.width.toFixed(3) + '%"></div>'; }).join('') +
+      axis.lines.map(function (l) { return '<div class="g-line gl-' + l.cls + '" style="left:' + l.left.toFixed(3) + '%"></div>'; }).join('');
+  }
+  function ganttTickHtml(axis, cls) {
+    return axis.ticks.map(function (t) {
+      return '<span class="' + cls + (t.c ? ' c' : '') + (t.we ? ' we' : '') + (t.today ? ' td' : '') + '" style="left:' + t.left.toFixed(3) + '%;width:' + t.width.toFixed(3) + '%">' +
+        esc(t.label) + (t.sub ? '<small>' + t.sub + '</small>' : '') + '</span>';
+    }).join('');
+  }
+  /** 目盛りの切り替え（日・週・月・四半期・全体）。PC もスマホも同じ */
+  function ganttUnitSeg(full) {
+    var mode = S.gscale || 'week';
+    return '<div class="seg' + (full ? ' full' : '') + '" role="group" aria-label="目盛り">' + G_UNITS.map(function (u) {
+      return '<button type="button" data-gunit="' + u[0] + '" aria-pressed="' + (mode === u[0]) + '" class="' + (mode === u[0] ? 'active' : '') + '">' + u[1] + '</button>';
+    }).join('') + '</div>';
   }
 
   /**
    * PC・タブレットのガント。名前の欄は左に貼り付き、時間軸を横にスクロールする。
    * @param rows [{ name, level, startDate, endDate, calc, href(タスクID), tag, metaHtml, itemType, itemKey,
    *               kind:'group'|'sub'(まとめ行), open, badgeHtml, attrs, dragProject }]
-   * @param opt  { today, labelHead, emptyText, scale }
+   * @param opt  { today, labelHead, emptyText }（目盛りは S.gscale）
    */
   function ganttHtml(rows, opt) {
     opt = opt || {};
@@ -855,21 +923,25 @@
     min = H.addDays(min, -3);
     max = H.addDays(max, 10);
 
-    var axis = ganttAxis(min, max, today, opt.scale);
+    var mode = S.gscale || 'week';
+    var unit = mode === 'fit' ? fitUnit(H.diffDays(min, max) + 1, 760) : mode;
+    var rg = snapRange(min, max, unit);
+    min = rg[0]; max = rg[1];
+    var axis = ganttAxis(min, max, today, unit);
     var lines = ganttGridLines(axis);
+    // 全体：画面の幅に収める。それ以外：1日あたりの幅を固定し、はみ出した分は横に流す
+    var zoomAttr = mode === 'fit' ? '' : ' style="--gtrack:' + Math.round(axis.span * G_PX[unit]) + 'px"';
     var todayLine = axis.todayPos === null ? '' : '<div class="g-today" style="left:' + axis.todayPos.toFixed(2) + '%"></div>';
 
     var head = '<div class="g-head">' +
       '<div class="g-headlabel">' + esc(opt.labelHead || 'タスク（期間）') + '</div>' +
       '<div class="g-axis"><div class="g-months">' +
-        axis.months.map(function (m) {
-          return '<div class="g-month" style="left:' + m.left.toFixed(2) + '%;width:' + m.width.toFixed(2) + '%">' + esc(m.label) + '</div>';
+        axis.top.map(function (m) {
+          return '<div class="g-month" style="left:' + m.left.toFixed(3) + '%;width:' + m.width.toFixed(3) + '%">' + esc(m.label) + '</div>';
         }).join('') +
-        (axis.todayPos === null ? '' : '<span class="g-todaytag" style="left:' + axis.todayPos.toFixed(2) + '%">今日 ' + esc(md(today)) + '</span>') +
+        (axis.todayPos === null ? '' : '<span class="g-todaytag" style="left:' + axis.todayPos.toFixed(3) + '%">今日 ' + esc(md(today)) + '</span>') +
       '</div>' +
-      '<div class="g-ticks">' + axis.ticks.map(function (t) {
-        return '<span class="g-tick" style="left:' + t.left.toFixed(2) + '%">' + esc(t.label) + '</span>';
-      }).join('') + '</div></div></div>';
+      '<div class="g-ticks">' + ganttTickHtml(axis, 'g-tick') + '</div></div></div>';
 
     var widthOf = function (a, b) { return Math.max(0.6, ((H.diffDays(a, b) + 1) / axis.span) * 100); };
 
@@ -888,7 +960,8 @@
         return '<div class="g-row g-' + r.kind + '"' + (r.attrs || '') + '>' +
           '<div class="g-label"><div class="g-name">' +
             (r.kind === 'group' ? '<span class="g-caret">' + ic(r.open ? 'down' : 'right', 14) + '</span>' : '') +
-            nameHtml + (r.badgeHtml || '') + '</div>' +
+            nameHtml + '</div>' +
+            (r.badgeHtml ? '<div class="g-badges">' + r.badgeHtml + '</div>' : '') +
             (r.metaHtml ? '<div class="g-dates">' + r.metaHtml + '</div>' : '') + '</div>' +
           '<div class="g-track">' + lines + span + todayLine + '</div></div>';
       }
@@ -912,7 +985,7 @@
       return '<div class="g-row lv' + (r.level || 1) + '">' + label + '<div class="g-track">' + lines + bar + todayLine + '</div></div>';
     }).join('');
 
-    return '<div class="gantt-scroll"><div class="gantt" data-min="' + esc(min) + '" data-span="' + axis.span + '">' + head + '<div class="g-rows">' + body + '<svg class="g-links" aria-hidden="true"></svg></div></div></div>';
+    return '<div class="gantt-scroll"><div class="gantt' + (mode === 'fit' ? '' : ' zoom') + ' u-' + unit + '"' + zoomAttr + ' data-min="' + esc(min) + '" data-span="' + axis.span + '">' + head + '<div class="g-rows">' + body + '<svg class="g-links" aria-hidden="true"></svg></div></div></div>';
   }
 
   /**
@@ -921,14 +994,14 @@
    */
   function ganttPhone(rows, opt) {
     opt = opt || {};
-    var start = S.gw.start || weekStart(S.today), days = S.gw.days;
-    var end = H.addDays(start, days - 1);
-    var pos = function (iso) { return H.diffDays(start, iso) / days * 100; };
-    var step = days > 60 ? 14 : 7;
-    var ticks = [];
-    for (var d = start; d <= end; d = H.addDays(d, step)) ticks.push(d);
-    var lines = ticks.map(function (w) { return '<span class="g-line" style="left:' + pos(w).toFixed(2) + '%"></span>'; }).join('');
-    var tpos = (S.today >= start && S.today <= end) ? pos(S.today) : null;
+    var mode = S.gscale || 'week';
+    var win = phoneWindow(rows, mode);
+    var start = win[0], end = win[1], days = H.diffDays(start, end) + 1;
+    var unit = mode === 'fit' ? fitUnit(days, 330) : mode;
+    var axis = ganttAxis(start, end, S.today, unit);
+    var pos = axis.pos;
+    var lines = ganttGridLines(axis);
+    var tpos = axis.todayPos;
     var todayLine = tpos === null ? '' : '<span class="g-today" style="left:' + tpos.toFixed(2) + '%"></span>';
 
     function track(s, e, calc, tapKey) {
@@ -965,18 +1038,44 @@
       '</div>';
     }).join('');
 
-    return '<div class="gm-ctrl">' +
-        '<button type="button" class="btn sm icon" data-gwnav="-1" aria-label="前へ">' + ic('left', 16) + '</button>' +
-        '<span class="rng">' + shortRange(start, end) + '</span>' +
-        '<button type="button" class="btn sm icon" data-gwnav="1" aria-label="次へ">' + ic('right', 16) + '</button>' +
-        '<button type="button" class="btn sm ghost" data-gwnav="0">今日</button><span class="spacer"></span>' +
-        '<div class="seg"><button type="button" data-gwdays="28" class="' + (days === 28 ? 'active' : '') + '">4週</button>' +
-        '<button type="button" data-gwdays="91" class="' + (days === 91 ? 'active' : '') + '">3か月</button></div></div>' +
+    var fit = mode === 'fit';
+    return '<div class="gm-ctrl">' + ganttUnitSeg(true) +
+        '<div class="gm-nav">' +
+          '<button type="button" class="btn sm icon" data-gwnav="-1" aria-label="前へ"' + (fit ? ' disabled' : '') + '>' + ic('left', 16) + '</button>' +
+          '<span class="rng">' + shortRange(start, end) + '</span>' +
+          '<button type="button" class="btn sm icon" data-gwnav="1" aria-label="次へ"' + (fit ? ' disabled' : '') + '>' + ic('right', 16) + '</button>' +
+          '<button type="button" class="btn sm" data-gtoday>今日</button></div></div>' +
       (rows.length
-        ? '<div class="gm"><div class="gm-axis">' + ticks.map(function (w) { return '<span style="left:' + pos(w).toFixed(2) + '%">' + md(w) + '</span>'; }).join('') +
-            (tpos === null ? '' : '<span class="g-todaytag" style="left:' + tpos.toFixed(2) + '%">今日</span>') + '</div>' + body + '</div>' +
+        ? '<div class="gm"><div class="gm-axis">' +
+            '<div class="gm-top">' + axis.top.map(function (m) { return '<span style="left:' + m.left.toFixed(3) + '%;width:' + m.width.toFixed(3) + '%">' + esc(m.label) + '</span>'; }).join('') + '</div>' +
+            '<div class="gm-bot">' + ganttTickHtml(axis, 'gm-t') + '</div>' +
+            (tpos === null ? '' : '<span class="gm-todayline" style="left:' + tpos.toFixed(3) + '%" title="今日"></span>') + '</div>' + body + '</div>' +
           '<p class="help">バーを押すと日程を変えられます（±1日・±1週）</p>'
         : '<div class="gm">' + emptyBox(opt.emptyText || '期間の入ったタスクがありません') + '</div>');
+  }
+
+  /** スマホの1画面の始まり（単位ごと）。今日が入る位置から始める */
+  function gwDefaultStart(mode) {
+    if (mode === 'day') return weekStart(S.today);
+    if (mode === 'month') return addMonths(S.today, -1);
+    if (mode === 'quarter') return quarterStart(S.today);
+    return weekStart(H.addDays(S.today, -7));
+  }
+  /** スマホの1画面の期間。日＝1週間、週＝4週間、月＝3か月、四半期＝1年、全体＝全部の期間 */
+  function phoneWindow(rows, mode) {
+    if (mode === 'fit') {
+      var lo = S.today, hi = S.today;
+      rows.forEach(function (r) {
+        if (r.startDate && r.startDate < lo) lo = r.startDate;
+        if (r.endDate && r.endDate > hi) hi = r.endDate;
+      });
+      return [H.addDays(lo, -2), H.addDays(hi, 2)];
+    }
+    var s = S.gw.start || gwDefaultStart(mode);
+    if (mode === 'day') return [s, H.addDays(s, 6)];
+    if (mode === 'month') return [monthStart(s), H.addDays(addMonths(s, 3), -1)];
+    if (mode === 'quarter') return [quarterStart(s), H.addDays(addMonths(quarterStart(s), 12), -1)];
+    return [s, H.addDays(s, 27)];
   }
 
   function ganttLegend() {
@@ -990,7 +1089,8 @@
   /** ガントの入れ物。スマホは2段の作り、それ以外は横の時間軸 */
   function ganttBlock(rows, opt) {
     if (isPhone()) return ganttPhone(rows, opt);
-    return '<div class="gantt-card">' + ganttHtml(rows, opt) + ganttLegend() + '</div>';
+    return '<div class="gtools">' + ganttUnitSeg(false) + '<button type="button" class="btn sm" data-gtoday>' + ic('right', 14) + '今日へ</button></div>' +
+      '<div class="gantt-card">' + ganttHtml(rows, opt) + ganttLegend() + '</div>';
   }
 
   /** 期間の表示。yyyy/mm/dd〜yyyy/mm/dd */
@@ -1137,13 +1237,12 @@
       }
     });
     return '<div class="bar">' +
-        (isPhone() ? '' : '<div class="seg" aria-label="目盛り"><button type="button" data-pgscale="week" class="' + (S.portfolioScale === 'week' ? 'active' : '') + '">週</button><button type="button" data-pgscale="month" class="' + (S.portfolioScale !== 'week' ? 'active' : '') + '">月</button></div>') +
         '<select class="chip' + (S.portfolioOwner ? ' on' : '') + '" id="pg-owner" aria-label="オーナー">' + optionList([['', 'オーナー：すべて']].concat(S.users.map(function (u) { return [u.user_id, 'オーナー：' + u.name]; })), S.portfolioOwner) + '</select>' +
         '<button type="button" class="chip' + (S.portfolioShowDone ? ' on' : '') + '" data-sflag="portfolioShowDone">完了も表示</button>' +
         '<span class="spacer"></span><span class="count">' + shown.length + ' 件</span>' +
       '</div>' +
       '<p class="help">行を押すと開き、配下のタスクが出ます。帯を動かすとプロジェクトの期間が変わります</p>' +
-      ganttBlock(rows, { today: S.today, scale: S.portfolioScale, labelHead: 'プロジェクト（期間）', emptyText: '条件に合うプロジェクトがありません' });
+      ganttBlock(rows, { today: S.today, labelHead: 'プロジェクト（期間）', emptyText: '条件に合うプロジェクトがありません' });
   }
 
   // ================================================================ ③〜⑧ プロジェクト詳細
@@ -1359,10 +1458,9 @@
       });
     });
     return '<div class="bar">' +
-        (isPhone() ? '' : '<div class="seg" aria-label="目盛り"><button type="button" data-gscale="week" class="' + (S.ganttScale !== 'month' ? 'active' : '') + '">週</button><button type="button" data-gscale="month" class="' + (S.ganttScale === 'month' ? 'active' : '') + '">月</button></div>') +
         '<button type="button" class="chip' + (showDone ? ' on' : '') + '" data-sflag="ganttShowDone" aria-pressed="' + showDone + '">完了も表示</button>' +
         '<span class="spacer"></span><span class="count">タスク ' + rows.length + ' 件</span></div>' +
-      ganttBlock(rows, { today: S.today, scale: S.ganttScale, labelHead: 'タスク（期間）' });
+      ganttBlock(rows, { today: S.today, labelHead: 'タスク（期間）' });
   }
 
   /** 概要に出すときの値の見せ方（型に合わせる） */
