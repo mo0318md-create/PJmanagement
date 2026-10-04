@@ -159,6 +159,8 @@ function strip_(o) {
  * @param patch { item_id, name, description, item_type, assignee_user_id,
  *                status, start_date, end_date, progress_rate, depends_on?, updated_at }
  *   depends_on は渡したときだけ書き換える（ガントやボードからの保存では渡さない）
+ *   complete_children: true で完了にすると、完了していない子タスクもまとめて完了にする（Backlog の「すべて完了にする」）
+ *   complete_parent: true で子タスクを完了にすると、兄弟がすべて完了していれば親タスクも完了にする
  *   updated_at は読み込んだときの値。ほかの人が先に更新していたら弾く。
  */
 function saveItem(patch) {
@@ -198,10 +200,38 @@ function saveItem(patch) {
     if (String(oldAssignee || '') !== String(next.assignee_user_id || '')) {
       notifyAssignChange_(cur, oldAssignee, next.assignee_user_id);
     }
+    // 親を完了にするとき、選ばれていれば子タスクもまとめて完了にする（親だけ完了も選べる）
+    var children = [];
+    if (patch.complete_children === true && next.status === STATUS.DONE) {
+      readAll_('items').forEach(function (k) {
+        if (k.parent_item_id !== cur.item_id || k.status === STATUS.DONE) return;
+        var kn = { status: STATUS.DONE, progress_rate: 100 };
+        stampEdit_(kn, me);
+        updateRow_('items', k.item_id, kn);
+        var ks = strip_(k);
+        Object.keys(kn).forEach(function (key) { ks[key] = kn[key]; });
+        children.push(ks);
+      });
+    }
     // 画面は、この戻り値だけで表示を合わせる（全件の読み直しや起動データの取り直しをしない）
     var saved = strip_(cur);
     Object.keys(next).forEach(function (k) { saved[k] = next[k]; });
-    return { ok: true, updated_at: next.updated_at, item: saved, summary: refreshSummary_(cur.project_id) };
+    // 最後の子タスクを完了にするとき、選ばれていれば親タスクも完了にする
+    var parentSaved = null;
+    if (patch.complete_parent === true && next.status === STATUS.DONE && cur.parent_item_id) {
+      var par = findById_('items', cur.parent_item_id);
+      var allDone = readAll_('items').every(function (k) {
+        return k.parent_item_id !== cur.parent_item_id || k.item_id === cur.item_id || k.status === STATUS.DONE;
+      });
+      if (par && par.status !== STATUS.DONE && allDone) {
+        var pn = { status: STATUS.DONE, progress_rate: '' };   // 子を持つので進捗率は子の平均（行には持たない）
+        stampEdit_(pn, me);
+        updateRow_('items', par.item_id, pn);
+        parentSaved = strip_(par);
+        Object.keys(pn).forEach(function (key) { parentSaved[key] = pn[key]; });
+      }
+    }
+    return { ok: true, updated_at: next.updated_at, item: saved, children: children, parent: parentSaved, summary: refreshSummary_(cur.project_id) };
   });
 }
 

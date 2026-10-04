@@ -838,4 +838,12 @@ body.is-dragging svg.g-links { opacity: .25; }
   .rows:not(.fams) > .row.grp { background: none; border: 0; padding: 6px 2px 0; }
   .fam { border-radius: 12px; }
 }
+
+/* 親タスクを完了にするときの確認（子も完了にするか、親だけか） */
+.kidlist { margin: 10px 0 14px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+.kidlist .faint { font-size: 12px; }
+.kidbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+.kidask { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.kidask p { margin: 0; font-size: 13.5px; }
+@media (max-width: 600px) { .kidbtns .btn { flex: 1 1 100%; min-height: 44px; } }
 </style>

@@ -1829,7 +1829,7 @@
         var id = this.getAttribute('data-status'), it = itemById(id);
         if (!it) return;
         var before = { status: it.status, progress_rate: it.progress_rate };
-        quickSave(id, { status: this.value }, { msg: '「' + it.name + '」を ' + H.STATUS_LABEL[this.value] + ' にしました', undo: before });
+        changeStatus(id, this.value, { msg: '「' + it.name + '」を ' + H.STATUS_LABEL[this.value] + ' にしました', undo: before });
       });
     });
 
@@ -2193,7 +2193,7 @@
       if (!b.col || !it) return;
       var status = b.col.getAttribute('data-dropcol');
       if (it.status === status) return;
-      quickSave(b.id, { status: status }, {
+      changeStatus(b.id, status, {
         msg: '「' + it.name + '」を ' + H.STATUS_LABEL[status] + ' にしました',
         undo: { status: it.status, progress_rate: it.progress_rate }
       });
@@ -2302,6 +2302,81 @@
    * opts: { msg: 保存後に出す文, undo: 取り消すときに戻す値 }
    */
   var saveChains = {}, saveSeq = {};
+  /* ---------------- 親タスクを完了にするとき（Backlog と同じ：子も完了にするか、親だけか選ぶ） ---------------- */
+  function openKids(id) {
+    return (S.items || []).filter(function (x) { return x.parent_item_id === id && x.status !== 'done'; });
+  }
+  /** 完了していない子タスクがある親を完了にするときの確認。choose(true＝すべて完了 / false＝親のみ)。やめたら cancel() */
+  function askCompleteKids(it, kids, choose, cancel) {
+    openModal(modalHead('子タスクが完了していません') +
+      '<div class="m-body"><p style="margin:0">「' + esc(it.name) + '」には、完了していない子タスクが <b>' + kids.length + ' 件</b>あります。</p>' +
+        '<ul class="kidlist">' + kids.slice(0, 6).map(function (k) { return '<li>' + esc(k.name) + ' <span class="faint">' + H.STATUS_LABEL[k.status] + '</span></li>'; }).join('') +
+          (kids.length > 6 ? '<li class="faint">ほか ' + (kids.length - 6) + ' 件</li>' : '') + '</ul>' +
+        '<div class="kidbtns"><button type="button" class="btn primary" id="ck-all">すべて完了にする</button>' +
+          '<button type="button" class="btn" id="ck-parent">親タスクのみ完了にする</button>' +
+          '<button type="button" class="btn ghost" id="ck-cancel">やめる</button></div>' +
+        '<p class="help">「すべて完了にする」は、子タスクのステータスも完了（進捗 100%）にします</p></div>');
+    $('ck-all').onclick = function () { closeModal(); choose(true); };
+    $('ck-parent').onclick = function () { closeModal(); choose(false); };
+    $('ck-cancel').onclick = function () { closeModal(); if (cancel) cancel(); };
+    // ×・背景を押して閉じたときも「やめる」と同じ（マイタスクの選択欄を元の値に戻す）
+    var x = document.querySelector('#modal [data-close]');
+    if (x) x.onclick = function (e) { e.stopPropagation(); closeModal(); if (cancel) cancel(); };
+    $('backdrop').onclick = function () { closeModal(); if (cancel) cancel(); };
+  }
+  /** 子タスクを完了にすると、兄弟がすべて完了になる親（まだ完了していない親）。無ければ null */
+  function parentToClose(it) {
+    if (!it || !it.parent_item_id) return null;
+    var par = itemById(it.parent_item_id);
+    if (!par || par.status === 'done') return null;
+    var rest = (S.items || []).filter(function (x) { return x.parent_item_id === par.item_id && x.item_id !== it.item_id && x.status !== 'done'; });
+    return rest.length ? null : par;
+  }
+  /** 最後の子タスクを完了にするときの確認。choose(true＝親も完了 / false＝子のみ)。やめたら cancel() */
+  function askCompleteParent(it, par, choose, cancel) {
+    openModal(modalHead('子タスクがすべて完了します') +
+      '<div class="m-body"><p style="margin:0 0 14px">「' + esc(it.name) + '」を完了にすると、親タスク「<b>' + esc(par.name) + '</b>」の子タスクはすべて完了になります。親タスクも完了にしますか？</p>' +
+        '<div class="kidbtns"><button type="button" class="btn primary" id="cp-yes">親タスクも完了にする</button>' +
+          '<button type="button" class="btn" id="cp-no">子タスクのみ完了にする</button>' +
+          '<button type="button" class="btn ghost" id="cp-cancel">やめる</button></div></div>');
+    var stop = function () { closeModal(); if (cancel) cancel(); };
+    $('cp-yes').onclick = function () { closeModal(); choose(true); };
+    $('cp-no').onclick = function () { closeModal(); choose(false); };
+    $('cp-cancel').onclick = stop;
+    var x = document.querySelector('#modal [data-close]');
+    if (x) x.onclick = function (e) { e.stopPropagation(); stop(); };
+    $('backdrop').onclick = stop;
+  }
+  /**
+   * ボード・移動・マイタスクからステータスを変える入口。完了にするとき：
+   * 子が残っている親なら「子もまとめて完了にするか」、最後の子なら「親も完了にするか」を先に聞く
+   */
+  function changeStatus(id, st, opts) {
+    var it = itemById(id);
+    if (!it) return;
+    var kids = st === 'done' ? openKids(id) : [];
+    var par = st === 'done' ? parentToClose(it) : null;
+    if (kids.length) {
+      askCompleteKids(it, kids, function (all) {
+        quickSave(id, { status: st }, all ? {
+          completeChildren: true,
+          msg: '「' + it.name + '」と子タスク ' + kids.length + ' 件を完了にしました'
+        } : opts);
+      }, function () { render(); });
+      return;
+    }
+    if (par) {
+      askCompleteParent(it, par, function (yes) {
+        quickSave(id, { status: st }, yes ? {
+          completeParent: true,
+          msg: '「' + it.name + '」と親タスク「' + par.name + '」を完了にしました'
+        } : opts);
+      }, function () { render(); });
+      return;
+    }
+    quickSave(id, { status: st }, opts);
+  }
+
   function quickSave(itemId, patch, opts) {
     opts = opts || {};
     var it = itemById(itemId);
@@ -2310,6 +2385,14 @@
       if (patch[k] !== undefined) it[k] = patch[k];
     });
     if (it.status === 'done') it.progress_rate = 100;
+    if (opts.completeChildren) {
+      // 画面ではすぐ子も完了に見せる（保存中の印は親に付く）。失敗したら読み直して戻す
+      openKids(itemId).forEach(function (k) { k.status = 'done'; k.progress_rate = 100; });
+    }
+    if (opts.completeParent) {
+      var par0 = parentToClose(it);
+      if (par0) par0.status = 'done';
+    }
     beginSave(itemId);
     render();
 
@@ -2324,8 +2407,10 @@
         name: it.name, description: it.description || '',
         item_type: it.item_type, assignee_user_id: it.assignee_user_id,
         status: it.status, start_date: it.start_date, end_date: it.end_date,
-        progress_rate: it.progress_rate
+        progress_rate: it.progress_rate, complete_children: !!opts.completeChildren, complete_parent: !!opts.completeParent
       }).then(function (r) {
+        (r.children || []).forEach(mergeItem);
+        if (r.parent) mergeItem(r.parent);
         var newerQueued = mySeq !== saveSeq[itemId];
         if (newerQueued) {
           // このあとにもう1つ保存が控えている。画面の値（新しい方）は残し、更新日時・更新者だけ合わせる
@@ -3071,7 +3156,7 @@
     var it = itemById(id);
     closeModal();
     if (!it || it.status === st) return;
-    quickSave(id, { status: st }, {
+    changeStatus(id, st, {
       msg: '「' + it.name + '」を ' + H.STATUS_LABEL[st] + ' にしました',
       undo: { status: it.status, progress_rate: it.progress_rate }
     });
@@ -3123,7 +3208,48 @@
     document.body.style.overflow = '';
   }
 
-  function saveTask(item, isNew, hasKids) {
+  /** 編集の小窓の下の帯に選択肢を出す。「戻る」で元のボタンに戻す（入力した内容はそのまま） */
+  function footAsk(html, choices) {
+    var foot = document.querySelector('#modal .m-foot');
+    Array.prototype.forEach.call(foot.children, function (el) { el.hidden = true; });
+    var ask = document.createElement('div');
+    ask.className = 'kidask';
+    ask.innerHTML = '<p>' + html + '</p><div class="kidbtns">' + choices.map(function (ch, i) {
+        return '<button type="button" class="btn' + (i === 0 ? ' primary' : '') + '" data-fa="' + i + '">' + ch[0] + '</button>';
+      }).join('') + '<button type="button" class="btn ghost" data-fa="back">戻る</button></div>';
+    foot.appendChild(ask);
+    ask.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-fa]');
+      if (!b) return;
+      ask.remove();
+      var k = b.getAttribute('data-fa');
+      if (k === 'back') { Array.prototype.forEach.call(foot.children, function (el) { el.hidden = false; }); return; }
+      choices[Number(k)][1]();
+    });
+  }
+
+  function saveTask(item, isNew, hasKids, choice) {
+    choice = choice || {};
+    var toDone = !isNew && $('t-status').value === 'done' && item.status !== 'done';
+    // 子が残っている親を完了にするとき：子もまとめて完了にするか（Backlog と同じ）
+    var kidsLeft = toDone ? openKids(item.item_id) : [];
+    if (kidsLeft.length && choice.kids === undefined) {
+      footAsk('完了していない子タスクが <b>' + kidsLeft.length + ' 件</b>あります', [
+        ['すべて完了にする', function () { saveTask(item, isNew, hasKids, { kids: true }); }],
+        ['親タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, { kids: false }); }]
+      ]);
+      return;
+    }
+    // 最後の子タスクを完了にするとき：親タスクも完了にするか
+    var par = toDone ? parentToClose(item) : null;
+    if (par && choice.parent === undefined) {
+      footAsk('親タスク「<b>' + esc(par.name) + '</b>」の子タスクがすべて完了になります', [
+        ['親タスクも完了にする', function () { saveTask(item, isNew, hasKids, { parent: true }); }],
+        ['子タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, { parent: false }); }]
+      ]);
+      return;
+    }
+    var chosen = choice.kids !== undefined || choice.parent !== undefined;
     var payload = {
       name: $('t-name').value,
       description: $('t-desc').value,
@@ -3136,6 +3262,13 @@
     };
     var btn = $('t-save');
     if (btn.__deps) payload.depends_on = btn.__deps();
+    if (choice.kids) payload.complete_children = true;
+    if (choice.parent) payload.complete_parent = true;
+    if (chosen) {
+      // 選んだあとは、隠していた保存ボタンだけを出して「保存しています…」にする（失敗したら押し直せる）
+      Array.prototype.forEach.call(document.querySelectorAll('#modal .m-foot > *'), function (el) { el.hidden = el !== btn; });
+      btn.onclick = function () { saveTask(item, isNew, hasKids, choice); };
+    }
     btn.disabled = true; btn.textContent = isNew ? '追加しています…' : '保存しています…';
     var key = isNew ? 'new' : item.item_id;
     beginSave(key);
@@ -3144,6 +3277,10 @@
     function done(r, msg) {
       endSave(key);
       if (r.item) mergeItem(r.item);
+      (r.children || []).forEach(mergeItem);
+      if (r.parent) mergeItem(r.parent);
+      if (r.children && r.children.length) msg = msg.replace('保存しました', '保存し、子タスク ' + r.children.length + ' 件も完了にしました');
+      if (r.parent) msg = msg.replace('保存しました', '保存し、親タスク「' + r.parent.name + '」も完了にしました');
       applySummary(r.summary);
       closeModal();
       render();
