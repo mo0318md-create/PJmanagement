@@ -2611,8 +2611,9 @@
   /* ---- 作成画面のテンプレートの一覧（名前で探す・50件ずつ出す） ---- */
   var TPL_PAGE = 50;
   /** 有効なテンプレートを、よく使われている順（同数は名前順）に */
+  var tplUsed = {};   // テンプレートごとの使われた回数（プロジェクトの数）
   function tplSorted() {
-    var used = {};
+    var used = tplUsed = {};
     S.projects.forEach(function (p) { if (p.template_id) used[p.template_id] = (used[p.template_id] || 0) + 1; });
     return S.templates.filter(function (t) { return t.active !== false; }).sort(function (a, b) {
       return (used[b.template_id] || 0) - (used[a.template_id] || 0) || String(a.name).localeCompare(String(b.name), 'ja');
@@ -2630,9 +2631,10 @@
       if (st) shown = [st].concat(shown);
     }
     var row = function (id, name, desc) {
-      var on = (sel || '') === id;
+      var on = (sel || '') === id, n = id ? tplUsed[id] || 0 : 0;
       return '<button type="button" class="tplcard' + (on ? ' active' : '') + '" data-tplcard="' + esc(id) + '" role="radio" aria-checked="' + on + '">' +
-        '<span class="tx"><b>' + esc(name) + '</b><small>' + esc(desc) + '</small></span></button>';
+        '<span class="tx"><b>' + esc(name) + '</b><small>' + esc(desc) + '</small></span>' +
+        (n ? '<i title="このテンプレートで作ったプロジェクトの数">使用 ' + n + '</i>' : '') + '</button>';
     };
     var rest = hits.length - Math.min(hits.length, S.tplLimit || TPL_PAGE);
     var cnt = $('n-tplq-n');
