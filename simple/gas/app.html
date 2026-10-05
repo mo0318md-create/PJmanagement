@@ -2351,30 +2351,65 @@
    * ボード・移動・マイタスクからステータスを変える入口。完了にするとき：
    * 子が残っている親なら「子もまとめて完了にするか」、最後の子なら「親も完了にするか」を先に聞く
    */
+  /**
+   * このタスクを完了にすると（選んだ連動も含めて）プロジェクトのタスクがすべて完了になるなら、そのプロジェクト。
+   * プロジェクトがすでに完了なら null
+   */
+  function projectToClose(it, choice) {
+    var p = project(it.project_id);
+    if (!p || p.status === 'done') return null;
+    var willDone = {};
+    willDone[it.item_id] = true;
+    if (choice.kids) openKids(it.item_id).forEach(function (k) { willDone[k.item_id] = true; });
+    if (choice.parent) { var par = parentToClose(it); if (par) willDone[par.item_id] = true; }
+    var left = itemsOf(p.project_id).filter(function (x) { return x.status !== 'done' && !willDone[x.item_id]; });
+    return left.length ? null : p;
+  }
+  /** 最後のタスクを完了にするときの確認。choose(true＝プロジェクトも完了 / false＝タスクのみ) */
+  function askCompleteProject(it, p, choose, cancel) {
+    openModal(modalHead('すべてのタスクが完了します') +
+      '<div class="m-body"><p style="margin:0 0 14px">「' + esc(it.name) + '」を完了にすると、プロジェクト「<b>' + esc(p.name) + '</b>」のタスクはすべて完了になります。プロジェクトも完了にしますか？</p>' +
+        '<div class="kidbtns"><button type="button" class="btn primary" id="cj-yes">プロジェクトも完了にする</button>' +
+          '<button type="button" class="btn" id="cj-no">タスクのみ完了にする</button>' +
+          '<button type="button" class="btn ghost" id="cj-cancel">やめる</button></div></div>');
+    var stop = function () { closeModal(); if (cancel) cancel(); };
+    $('cj-yes').onclick = function () { closeModal(); choose(true); };
+    $('cj-no').onclick = function () { closeModal(); choose(false); };
+    $('cj-cancel').onclick = stop;
+    var x = document.querySelector('#modal [data-close]');
+    if (x) x.onclick = function (e) { e.stopPropagation(); stop(); };
+    $('backdrop').onclick = stop;
+  }
+  /** 「〇〇と子タスク n 件を完了にしました。プロジェクト「△△」も完了にしました」 */
+  function completeMsg(it, choice, nKids) {
+    var par = choice.parent ? parentToClose(it) : null;
+    var p = project(it.project_id);
+    return '「' + it.name + '」' + (choice.kids ? 'と子タスク ' + nKids + ' 件' : '') + (par ? 'と親タスク「' + par.name + '」' : '') + 'を完了にしました' +
+      (choice.project && p ? '。プロジェクト「' + p.name + '」も完了にしました' : '');
+  }
+  /**
+   * ボード・移動・マイタスクからステータスを変える入口。完了にするときは、当てはまる確認を順に聞く：
+   * ①子が残っている親 → 子もまとめて完了にするか ②最後の子 → 親も完了にするか ③最後のタスク → プロジェクトも完了にするか
+   */
   function changeStatus(id, st, opts) {
     var it = itemById(id);
     if (!it) return;
-    var kids = st === 'done' ? openKids(id) : [];
-    var par = st === 'done' ? parentToClose(it) : null;
-    if (kids.length) {
-      askCompleteKids(it, kids, function (all) {
-        quickSave(id, { status: st }, all ? {
-          completeChildren: true,
-          msg: '「' + it.name + '」と子タスク ' + kids.length + ' 件を完了にしました'
-        } : opts);
-      }, function () { render(); });
-      return;
-    }
-    if (par) {
-      askCompleteParent(it, par, function (yes) {
-        quickSave(id, { status: st }, yes ? {
-          completeParent: true,
-          msg: '「' + it.name + '」と親タスク「' + par.name + '」を完了にしました'
-        } : opts);
-      }, function () { render(); });
-      return;
-    }
-    quickSave(id, { status: st }, opts);
+    if (st !== 'done') { quickSave(id, { status: st }, opts); return; }
+    var choice = {}, nKids = openKids(id).length;
+    var cancel = function () { render(); };
+    (function next() {
+      var kids = openKids(id);
+      if (kids.length && choice.kids === undefined) { askCompleteKids(it, kids, function (v) { choice.kids = v; next(); }, cancel); return; }
+      var par = parentToClose(it);
+      if (par && choice.parent === undefined) { askCompleteParent(it, par, function (v) { choice.parent = v; next(); }, cancel); return; }
+      var p = projectToClose(it, choice);
+      if (p && choice.project === undefined) { askCompleteProject(it, p, function (v) { choice.project = v; next(); }, cancel); return; }
+      var any = choice.kids || choice.parent || choice.project;
+      quickSave(id, { status: st }, any ? {
+        completeChildren: !!choice.kids, completeParent: !!choice.parent, completeProject: !!choice.project,
+        msg: completeMsg(it, choice, nKids)
+      } : opts);
+    })();
   }
 
   function quickSave(itemId, patch, opts) {
@@ -2393,6 +2428,10 @@
       var par0 = parentToClose(it);
       if (par0) par0.status = 'done';
     }
+    if (opts.completeProject) {
+      var pj0 = project(it.project_id);
+      if (pj0) pj0.status = 'done';
+    }
     beginSave(itemId);
     render();
 
@@ -2407,10 +2446,11 @@
         name: it.name, description: it.description || '',
         item_type: it.item_type, assignee_user_id: it.assignee_user_id,
         status: it.status, start_date: it.start_date, end_date: it.end_date,
-        progress_rate: it.progress_rate, complete_children: !!opts.completeChildren, complete_parent: !!opts.completeParent
+        progress_rate: it.progress_rate, complete_children: !!opts.completeChildren, complete_parent: !!opts.completeParent, complete_project: !!opts.completeProject
       }).then(function (r) {
         (r.children || []).forEach(mergeItem);
         if (r.parent) mergeItem(r.parent);
+        mergeProject(r.project);
         var newerQueued = mySeq !== saveSeq[itemId];
         if (newerQueued) {
           // このあとにもう1つ保存が控えている。画面の値（新しい方）は残し、更新日時・更新者だけ合わせる
@@ -2889,11 +2929,35 @@
     '<div class="savebar"><button type="button" class="btn" data-tab="overview">やめる</button><button type="button" class="btn primary" data-psave>保存</button></div>';
   }
 
-  function saveProjectSettings() {
+  /** サーバーが返したプロジェクトの行を手元に合わせる */
+  function mergeProject(row) {
+    if (!row) return;
+    var p = project(row.project_id);
+    if (p) Object.keys(row).forEach(function (k) { p[k] = row[k]; });
+  }
+
+  function saveProjectSettings(choice) {
     var p = project(S.projectId);
     if (!p) return;
     var fc = feCollect('p');
     if (!feCheck(fc)) return;
+    // 完了していないタスクが残っているプロジェクトを完了にするとき：タスクもまとめて完了にするか（タスクと同じ確認）
+    var openItems = $('p-status').value === 'done' && p.status !== 'done'
+      ? itemsOf(p.project_id).filter(function (x) { return x.status !== 'done'; }) : [];
+    if (openItems.length && choice === undefined) {
+      openModal(modalHead('タスクが完了していません') +
+        '<div class="m-body"><p style="margin:0">「' + esc(p.name) + '」には、完了していないタスクが <b>' + openItems.length + ' 件</b>あります（子タスクを含む）。</p>' +
+          '<ul class="kidlist">' + openItems.slice(0, 6).map(function (k) { return '<li>' + esc(k.name) + ' <span class="faint">' + H.STATUS_LABEL[k.status] + '</span></li>'; }).join('') +
+            (openItems.length > 6 ? '<li class="faint">ほか ' + (openItems.length - 6) + ' 件</li>' : '') + '</ul>' +
+          '<div class="kidbtns"><button type="button" class="btn primary" id="pj-all">すべて完了にする</button>' +
+            '<button type="button" class="btn" id="pj-only">プロジェクトのみ完了にする</button>' +
+            '<button type="button" class="btn ghost" id="pj-cancel">やめる</button></div>' +
+          '<p class="help">「すべて完了にする」は、タスク・子タスクのステータスも完了にします</p></div>');
+      $('pj-all').onclick = function () { closeModal(); saveProjectSettings(true); };
+      $('pj-only').onclick = function () { closeModal(); saveProjectSettings(false); };
+      $('pj-cancel').onclick = closeModal;
+      return;
+    }
     var btns = document.querySelectorAll('[data-psave]');
     btns.forEach(function (b) { b.disabled = true; b.textContent = '保存しています…'; });
     beginSave('p:' + p.project_id);
@@ -2901,9 +2965,10 @@
       .withSuccessHandler(function (r) {
         endSave('p:' + p.project_id);
         Object.keys(r.project).forEach(function (k) { p[k] = r.project[k]; });
+        (r.items || []).forEach(mergeItem);
         applySummary(r.summary);
         render();
-        doneToast('「' + p.name + '」を保存しました');
+        doneToast('「' + p.name + '」を保存しました' + (r.items && r.items.length ? '。タスク ' + r.items.length + ' 件も完了にしました' : ''));
       })
       .withFailureHandler(function (err) {
         endSave('p:' + p.project_id);
@@ -2917,7 +2982,8 @@
         owner_user_id: $('p-owner').value, status: $('p-status').value,
         key: $('p-key').value.toUpperCase(),
         field_defs: fc.defs,
-        custom_fields: fc.values
+        custom_fields: fc.values,
+        complete_items: choice === true
       });
   }
 
@@ -3241,15 +3307,25 @@
       return;
     }
     // 最後の子タスクを完了にするとき：親タスクも完了にするか
+    var with_ = function (k, v) { var c2 = {}; Object.keys(choice).forEach(function (x) { c2[x] = choice[x]; }); c2[k] = v; return c2; };
     var par = toDone ? parentToClose(item) : null;
     if (par && choice.parent === undefined) {
       footAsk('親タスク「<b>' + esc(par.name) + '</b>」の子タスクがすべて完了になります', [
-        ['親タスクも完了にする', function () { saveTask(item, isNew, hasKids, { parent: true }); }],
-        ['子タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, { parent: false }); }]
+        ['親タスクも完了にする', function () { saveTask(item, isNew, hasKids, with_('parent', true)); }],
+        ['子タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, with_('parent', false)); }]
       ]);
       return;
     }
-    var chosen = choice.kids !== undefined || choice.parent !== undefined;
+    // 最後のタスクを完了にするとき：プロジェクトも完了にするか
+    var pj = toDone ? projectToClose(item, choice) : null;
+    if (pj && choice.project === undefined) {
+      footAsk('プロジェクト「<b>' + esc(pj.name) + '</b>」のタスクがすべて完了になります', [
+        ['プロジェクトも完了にする', function () { saveTask(item, isNew, hasKids, with_('project', true)); }],
+        ['タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, with_('project', false)); }]
+      ]);
+      return;
+    }
+    var chosen = choice.kids !== undefined || choice.parent !== undefined || choice.project !== undefined;
     var payload = {
       name: $('t-name').value,
       description: $('t-desc').value,
@@ -3264,6 +3340,7 @@
     if (btn.__deps) payload.depends_on = btn.__deps();
     if (choice.kids) payload.complete_children = true;
     if (choice.parent) payload.complete_parent = true;
+    if (choice.project) payload.complete_project = true;
     if (chosen) {
       // 選んだあとは、隠していた保存ボタンだけを出して「保存しています…」にする（失敗したら押し直せる）
       Array.prototype.forEach.call(document.querySelectorAll('#modal .m-foot > *'), function (el) { el.hidden = el !== btn; });
@@ -3281,6 +3358,7 @@
       if (r.parent) mergeItem(r.parent);
       if (r.children && r.children.length) msg = msg.replace('保存しました', '保存し、子タスク ' + r.children.length + ' 件も完了にしました');
       if (r.parent) msg = msg.replace('保存しました', '保存し、親タスク「' + r.parent.name + '」も完了にしました');
+      if (r.project) { mergeProject(r.project); msg += '。プロジェクト「' + r.project.name + '」も完了にしました'; }
       applySummary(r.summary);
       closeModal();
       render();

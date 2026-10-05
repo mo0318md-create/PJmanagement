@@ -161,6 +161,7 @@ function strip_(o) {
  *   depends_on は渡したときだけ書き換える（ガントやボードからの保存では渡さない）
  *   complete_children: true で完了にすると、完了していない子タスクもまとめて完了にする（Backlog の「すべて完了にする」）
  *   complete_parent: true で子タスクを完了にすると、兄弟がすべて完了していれば親タスクも完了にする
+ *   complete_project: true なら、プロジェクトのタスクがすべて完了になったとき、プロジェクトも完了にする
  *   updated_at は読み込んだときの値。ほかの人が先に更新していたら弾く。
  */
 function saveItem(patch) {
@@ -231,7 +232,20 @@ function saveItem(patch) {
         Object.keys(pn).forEach(function (key) { parentSaved[key] = pn[key]; });
       }
     }
-    return { ok: true, updated_at: next.updated_at, item: saved, children: children, parent: parentSaved, summary: refreshSummary_(cur.project_id) };
+    // 最後のタスクを完了にするとき、選ばれていればプロジェクトも完了にする（全件が完了のときだけ）
+    var projectSaved = null;
+    if (patch.complete_project === true && next.status === STATUS.DONE) {
+      var pj = findById_('projects', cur.project_id);
+      var left = readAll_('items').some(function (k) { return k.project_id === cur.project_id && k.status !== STATUS.DONE; });
+      if (pj && pj.status !== STATUS.DONE && !left) {
+        var pjn = { status: STATUS.DONE };
+        stampEdit_(pjn, me);
+        updateRow_('projects', pj.project_id, pjn);
+        projectSaved = strip_(pj);
+        Object.keys(pjn).forEach(function (key) { projectSaved[key] = pjn[key]; });
+      }
+    }
+    return { ok: true, updated_at: next.updated_at, item: saved, children: children, parent: parentSaved, project: projectSaved, summary: refreshSummary_(cur.project_id) };
   });
 }
 
@@ -452,12 +466,27 @@ function saveProject(patch) {
     next.field_defs = tDefs.concat(pDefs);
     next.custom_fields = cleanFieldValues_(next.field_defs, patch.custom_fields);
     updateRow_('projects', cur.project_id, next);
+    // プロジェクトを完了にするとき、選ばれていれば完了していないタスクもまとめて完了にする
+    var items = [];
+    if (patch.complete_items === true && next.status === STATUS.DONE) {
+      var all = readAll_('items').filter(function (k) { return k.project_id === cur.project_id; });
+      all.forEach(function (k) {
+        if (k.status === STATUS.DONE) return;
+        var hasKids = all.some(function (x) { return x.parent_item_id === k.item_id; });
+        var kn = { status: STATUS.DONE, progress_rate: hasKids ? '' : 100 };
+        stampEdit_(kn, me);
+        updateRow_('items', k.item_id, kn);
+        var ks = strip_(k);
+        Object.keys(kn).forEach(function (key) { ks[key] = kn[key]; });
+        items.push(ks);
+      });
+    }
     var saved = strip_(cur);
     Object.keys(next).forEach(function (k) { saved[k] = next[k]; });
     return {
       ok: true, updated_at: next.updated_at, updated_by: next.updated_by, updated_by_name: next.updated_by_name,
       field_defs: next.field_defs, custom_fields: next.custom_fields,
-      project: saved, summary: refreshSummary_(cur.project_id)
+      project: saved, items: items, summary: refreshSummary_(cur.project_id)
     };
   });
 }
