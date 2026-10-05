@@ -97,6 +97,7 @@ function getBootstrap() {
       // 画面は user_id / name で扱う。user_id の中身は社員コード（common のとき）
       return { user_id: p.code, name: p.name, email: p.email, dept: p.deptName, position: p.positionName };
     }),
+    driveReady: hasDriveRoot_(),
     peopleSource: pp.source,
     peopleNote: note,
     projects: projects.map(function (p) {
@@ -456,6 +457,13 @@ function saveProject(patch) {
       start_date: patch.start_date || '',
       end_date: patch.end_date || ''
     };
+    // 資料フォルダ（URL でも ID でもよい。空にすると外れる）
+    if (patch.drive_folder !== undefined) {
+      var ds = String(patch.drive_folder || '').trim();
+      var dm = ds ? ds.match(/[-\w]{25,}/) : null;
+      if (ds && !dm) throw new Error('資料フォルダのURLが読み取れません。Drive でフォルダを開いて「リンクをコピー」した文字列を貼ってください。');
+      next.drive_folder_id = dm ? dm[0] : '';
+    }
     stampEdit_(next, me);
     // テンプレート由来の項目は画面から変えさせない（名前・型・必須はプロジェクトが持つ控えのまま）
     var curDefs = fieldDefsOf_(cur);

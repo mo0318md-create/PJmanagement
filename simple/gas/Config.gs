@@ -62,7 +62,7 @@ var SHEETS = {
   projects: {
     key: 'project_id',
     cols: ['project_id', 'key', 'name', 'description', 'template_id', 'template_name', 'owner_user_id',
-           'status', 'start_date', 'end_date', 'custom_fields', 'field_defs', 'next_item_seq', 'created_at', 'updated_at', 'created_by', 'created_by_name', 'updated_by', 'updated_by_name']
+           'status', 'start_date', 'end_date', 'custom_fields', 'field_defs', 'drive_folder_id', 'next_item_seq', 'created_at', 'updated_at', 'created_by', 'created_by_name', 'updated_by', 'updated_by_name']
   },
   items: {
     key: 'item_id',

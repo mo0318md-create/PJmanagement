@@ -71,6 +71,7 @@
           a.style.background = avColor(d.me.user_id);
         }
         $('bell-dot').hidden = !d.unread;
+        S.driveReady = !!d.driveReady;
         S.peopleSource = d.peopleSource || 'ローカル';
         S.peopleNote = d.peopleNote || '';
         S.gw.start = weekStart(H.addDays(d.today, -7));
@@ -180,7 +181,9 @@
     move: '<path d="M5 12h14M14 7l5 5-5 5"/>',
     filter: '<path d="M4 6h16M7 12h10M10 18h4"/>',
     wait: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 2"/>',
-    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.1a2 2 0 0 1 1.5.7l1 1.3h7.4a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+    ext: '<path d="M14 4.5h5.5V10"/><path d="m19 5-7.5 7.5"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>'
   };
   function ic(n, s) {
     s = s || 18;
@@ -387,6 +390,8 @@
     var dsh = t.closest('[data-dshift]');
     if (dsh) { var sp = dsh.getAttribute('data-dshift').split(':'), ids = sp[0].split(','); shiftDates(ids[0], ids[1], Number(sp[1])); return; }
     if (t.closest('[data-tplmore]')) { S.tplLimit = (S.tplLimit || TPL_PAGE) + TPL_PAGE; redrawTplList(); return; }
+    var dvn = t.closest('[data-dvnew]');
+    if (dvn) { makeProjectFolder(dvn.getAttribute('data-dvnew'), dvn); return; }
     var tc = t.closest('[data-tplcard]');
     if (tc) { pickTemplateCard(tc.getAttribute('data-tplcard')); return; }
     if (t.closest('[data-create]')) { createProjectNow(); return; }
@@ -1344,7 +1349,7 @@
         '<div class="rows fams">' + (rows ? rowHead('タスク') + rows
           : emptyBox(S.df.delayedOnly ? '遅れているタスクはありません' : 'タスクがありません',
               S.df.delayedOnly ? '' : '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>' +
-      '</div><div class="ov-side">' + alert + feed + customFieldsCard(p) + '</div></div>';
+      '</div><div class="ov-side">' + alert + feed + driveCard(p) + customFieldsCard(p) + '</div></div>';
   }
 
   /** 子タスクを開いているか。既定は閉じる。「遅延だけ表示」のときは、遅れた子が見えるよう開く */
@@ -1481,6 +1486,28 @@
     return String(v);
   }
   /** 概要に設定項目を出す。値が1つも無いときは出さない（空のカードを並べない） */
+  /**
+   * 資料フォルダ（F-5-17）。登録済みなら開くだけ。未登録なら、親フォルダが設定されていれば作れる。
+   * 親フォルダが未設定のときは、編集画面でURLを貼る案内を出す（Drive の権限が無くても使えるように）
+   */
+  function driveCard(p) {
+    var has = !!p.drive_folder_id;
+    var body;
+    if (has) {
+      body = '<a class="btn primary wide" id="dv-open" href="https://drive.google.com/drive/folders/' + esc(p.drive_folder_id) + '" target="_blank" rel="noopener">' +
+        ic('folder', 16) + '資料フォルダを開く' + ic('ext', 14) + '</a>';
+    } else if (S.driveReady) {
+      body = '<button type="button" class="btn wide" data-dvnew="' + esc(p.project_id) + '">' + ic('folder', 16) + 'フォルダを作る</button>' +
+        '<p class="help">「[' + esc(p.key) + '] ' + esc(p.name) + '」という名前で、決められた場所に作ります</p>';
+    } else {
+      body = '<p class="help">まだありません。Drive のフォルダを開いて「リンクをコピー」し、' +
+        '<button type="button" class="linkish" data-tab="settings">プロジェクトの編集</button>で貼ると、ここから開けます。</p>';
+    }
+    return '<section class="card"><div class="card-head"><h2>資料フォルダ</h2><span class="spacer"></span>' +
+        (has ? '<button type="button" class="btn sm ghost" data-tab="settings">変える</button>' : '') +
+      '</div><div class="card-body">' + body + '</div></section>';
+  }
+
   function customFieldsCard(p) {
     var cf = p.custom_fields || {};
     var defs = (p.field_defs || []).filter(function (d) {
@@ -2901,11 +2928,35 @@
           '<div class="field"><label for="p-status">ステータス</label><select id="p-status">' +
             optionList(H.STATUS_ORDER.map(function (s) { return [s, H.STATUS_LABEL[s]]; }), p.status) + '</select></div>' +
         '</div></div>' +
+      '<div class="fsec"><h3>資料フォルダ</h3>' +
+        '<div class="field"><label for="p-drive">Drive のフォルダ</label>' +
+          '<input id="p-drive" type="text" value="' + (p.drive_folder_id ? 'https://drive.google.com/drive/folders/' + esc(p.drive_folder_id) : '') + '" placeholder="Drive で「リンクをコピー」して貼り付け">' +
+          '<p class="help">貼り付けて保存すると、概要から開けるようになります。空にすると外れます' +
+            (S.driveReady ? '（概要の「フォルダを作る」で自動で作ることもできます）' : '') + '</p></div></div>' +
       '<div class="fsec"><div id="p-custom"></div></div>' +
       '<div class="desk-only" style="display:flex;gap:8px;margin-top:6px"><button type="button" class="btn primary" data-psave>保存</button>' +
         '<button type="button" class="btn ghost" data-tab="overview">やめる</button></div>' +
     '</div></section>' +
     '<div class="savebar"><button type="button" class="btn" data-tab="overview">やめる</button><button type="button" class="btn primary" data-psave>保存</button></div>';
+  }
+
+  /** 資料フォルダを作って開く。作り終わるまで「作っています…」のままにする */
+  function makeProjectFolder(pid, btn) {
+    var p = project(pid);
+    if (!p) return;
+    btn.disabled = true; btn.textContent = 'フォルダを作っています…';
+    beginSave('p:' + pid);
+    runServer('openProjectFolder', pid).then(function (r) {
+      endSave('p:' + pid);
+      p.drive_folder_id = r.folder_id;
+      render();
+      doneToast(r.created ? '資料フォルダを作りました' : '資料フォルダを開きます');
+      window.open(r.url, '_blank', 'noopener');
+    }, function (err) {
+      endSave('p:' + pid);
+      btn.disabled = false; btn.innerHTML = ic('folder', 16) + 'フォルダを作る';
+      fail(err);
+    });
   }
 
   /** サーバーが返したプロジェクトの行を手元に合わせる */
@@ -2953,6 +3004,7 @@
         start_date: $('p-start').value, end_date: $('p-end').value,
         owner_user_id: $('p-owner').value, status: $('p-status').value,
         key: $('p-key').value.toUpperCase(),
+        drive_folder: $('p-drive') ? $('p-drive').value : undefined,
         field_defs: fc.defs,
         custom_fields: fc.values,
         complete_items: choice === true
