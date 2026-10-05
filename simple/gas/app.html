@@ -243,7 +243,8 @@
       (right || '') + '<span class="spacer"></span>' +
       '<button type="button" class="icon-btn" data-close aria-label="閉じる">' + ic('close', 18) + '</button></div>';
   }
-  function openModal(html) {
+  function openModal(html, dialog) {
+    $('modal').classList.toggle('dlg', !!dialog);   // 確認など短いものは中央の小さなダイアログ（スマホは下から）
     $('modal').innerHTML = html;
     $('modal').hidden = false;
     $('backdrop').hidden = false;
@@ -2306,24 +2307,6 @@
   function openKids(id) {
     return (S.items || []).filter(function (x) { return x.parent_item_id === id && x.status !== 'done'; });
   }
-  /** 完了していない子タスクがある親を完了にするときの確認。choose(true＝すべて完了 / false＝親のみ)。やめたら cancel() */
-  function askCompleteKids(it, kids, choose, cancel) {
-    openModal(modalHead('子タスクが完了していません') +
-      '<div class="m-body"><p style="margin:0">「' + esc(it.name) + '」には、完了していない子タスクが <b>' + kids.length + ' 件</b>あります。</p>' +
-        '<ul class="kidlist">' + kids.slice(0, 6).map(function (k) { return '<li>' + esc(k.name) + ' <span class="faint">' + H.STATUS_LABEL[k.status] + '</span></li>'; }).join('') +
-          (kids.length > 6 ? '<li class="faint">ほか ' + (kids.length - 6) + ' 件</li>' : '') + '</ul>' +
-        '<div class="kidbtns"><button type="button" class="btn primary" id="ck-all">すべて完了にする</button>' +
-          '<button type="button" class="btn" id="ck-parent">親タスクのみ完了にする</button>' +
-          '<button type="button" class="btn ghost" id="ck-cancel">やめる</button></div>' +
-        '<p class="help">「すべて完了にする」は、子タスクのステータスも完了（進捗 100%）にします</p></div>');
-    $('ck-all').onclick = function () { closeModal(); choose(true); };
-    $('ck-parent').onclick = function () { closeModal(); choose(false); };
-    $('ck-cancel').onclick = function () { closeModal(); if (cancel) cancel(); };
-    // ×・背景を押して閉じたときも「やめる」と同じ（マイタスクの選択欄を元の値に戻す）
-    var x = document.querySelector('#modal [data-close]');
-    if (x) x.onclick = function (e) { e.stopPropagation(); closeModal(); if (cancel) cancel(); };
-    $('backdrop').onclick = function () { closeModal(); if (cancel) cancel(); };
-  }
   /** 子タスクを完了にすると、兄弟がすべて完了になる親（まだ完了していない親）。無ければ null */
   function parentToClose(it) {
     if (!it || !it.parent_item_id) return null;
@@ -2332,29 +2315,7 @@
     var rest = (S.items || []).filter(function (x) { return x.parent_item_id === par.item_id && x.item_id !== it.item_id && x.status !== 'done'; });
     return rest.length ? null : par;
   }
-  /** 最後の子タスクを完了にするときの確認。choose(true＝親も完了 / false＝子のみ)。やめたら cancel() */
-  function askCompleteParent(it, par, choose, cancel) {
-    openModal(modalHead('子タスクがすべて完了します') +
-      '<div class="m-body"><p style="margin:0 0 14px">「' + esc(it.name) + '」を完了にすると、親タスク「<b>' + esc(par.name) + '</b>」の子タスクはすべて完了になります。親タスクも完了にしますか？</p>' +
-        '<div class="kidbtns"><button type="button" class="btn primary" id="cp-yes">親タスクも完了にする</button>' +
-          '<button type="button" class="btn" id="cp-no">子タスクのみ完了にする</button>' +
-          '<button type="button" class="btn ghost" id="cp-cancel">やめる</button></div></div>');
-    var stop = function () { closeModal(); if (cancel) cancel(); };
-    $('cp-yes').onclick = function () { closeModal(); choose(true); };
-    $('cp-no').onclick = function () { closeModal(); choose(false); };
-    $('cp-cancel').onclick = stop;
-    var x = document.querySelector('#modal [data-close]');
-    if (x) x.onclick = function (e) { e.stopPropagation(); stop(); };
-    $('backdrop').onclick = stop;
-  }
-  /**
-   * ボード・移動・マイタスクからステータスを変える入口。完了にするとき：
-   * 子が残っている親なら「子もまとめて完了にするか」、最後の子なら「親も完了にするか」を先に聞く
-   */
-  /**
-   * このタスクを完了にすると（選んだ連動も含めて）プロジェクトのタスクがすべて完了になるなら、そのプロジェクト。
-   * プロジェクトがすでに完了なら null
-   */
+  /** このタスクを完了にすると（選んだ連動も含めて）プロジェクトのタスクがすべて完了になるなら、そのプロジェクト */
   function projectToClose(it, choice) {
     var p = project(it.project_id);
     if (!p || p.status === 'done') return null;
@@ -2365,17 +2326,44 @@
     var left = itemsOf(p.project_id).filter(function (x) { return x.status !== 'done' && !willDone[x.item_id]; });
     return left.length ? null : p;
   }
-  /** 最後のタスクを完了にするときの確認。choose(true＝プロジェクトも完了 / false＝タスクのみ) */
-  function askCompleteProject(it, p, choose, cancel) {
-    openModal(modalHead('すべてのタスクが完了します') +
-      '<div class="m-body"><p style="margin:0 0 14px">「' + esc(it.name) + '」を完了にすると、プロジェクト「<b>' + esc(p.name) + '</b>」のタスクはすべて完了になります。プロジェクトも完了にしますか？</p>' +
-        '<div class="kidbtns"><button type="button" class="btn primary" id="cj-yes">プロジェクトも完了にする</button>' +
-          '<button type="button" class="btn" id="cj-no">タスクのみ完了にする</button>' +
-          '<button type="button" class="btn ghost" id="cj-cancel">やめる</button></div></div>');
+  /**
+   * タスクを完了にするときの「どこまで完了にするか」の選択肢。広がるほど下に並ぶ。
+   * 1つしか無ければ（連動が無ければ）確認は出さない
+   */
+  function completeScopes(it) {
+    var kids = openKids(it.item_id), par = parentToClose(it);
+    var list = [{ label: 'このタスクだけ', choice: {} }];
+    var up = {};
+    if (kids.length) { up = { kids: true }; list.push({ label: '子タスク ' + kids.length + ' 件も', sub: kids.map(function (k) { return k.name; }).join('、'), choice: up }); }
+    if (par) { up = { parent: true }; list.push({ label: '親タスク「' + par.name + '」も', choice: up }); }
+    var p = projectToClose(it, up);
+    if (p) {
+      var ch = { project: true };
+      Object.keys(up).forEach(function (k) { ch[k] = up[k]; });
+      list.push({ label: 'プロジェクト「' + p.name + '」まで', sub: 'タスクがすべて完了になります', choice: ch });
+    }
+    return list;
+  }
+  /** 選択肢の行（ラジオ）。最初は1段広い方（子も・親も）を選んでおく */
+  function scopeRadios(list, name) {
+    var def = list.length > 1 ? 1 : 0;
+    return '<div class="scopes" role="radiogroup">' + list.map(function (o, i) {
+      return '<label class="scope"><input type="radio" name="' + name + '" value="' + i + '"' + (i === def ? ' checked' : '') + '>' +
+        '<span><b>' + esc(o.label) + '</b>' + (o.sub ? '<small>' + esc(o.sub) + '</small>' : '') + '</span></label>';
+    }).join('') + '</div>';
+  }
+  /** 「どこまで完了にしますか？」のダイアログ。ok(choice)、やめたら cancel() */
+  function askScope(title, list, ok, cancel) {
+    openModal(modalHead(title) +
+      '<div class="m-body"><p class="scope-q">どこまで完了にしますか？</p>' + scopeRadios(list, 'scope') + '</div>' +
+      '<div class="m-foot"><span class="spacer"></span><button type="button" class="btn" id="sc-cancel">やめる</button>' +
+        '<button type="button" class="btn primary" id="sc-ok">完了にする</button></div>', true);
     var stop = function () { closeModal(); if (cancel) cancel(); };
-    $('cj-yes').onclick = function () { closeModal(); choose(true); };
-    $('cj-no').onclick = function () { closeModal(); choose(false); };
-    $('cj-cancel').onclick = stop;
+    $('sc-ok').onclick = function () {
+      var v = Number((document.querySelector('#modal input[name="scope"]:checked') || {}).value || 0);
+      closeModal(); ok(list[v].choice);
+    };
+    $('sc-cancel').onclick = stop;
     var x = document.querySelector('#modal [data-close]');
     if (x) x.onclick = function (e) { e.stopPropagation(); stop(); };
     $('backdrop').onclick = stop;
@@ -2387,29 +2375,20 @@
     return '「' + it.name + '」' + (choice.kids ? 'と子タスク ' + nKids + ' 件' : '') + (par ? 'と親タスク「' + par.name + '」' : '') + 'を完了にしました' +
       (choice.project && p ? '。プロジェクト「' + p.name + '」も完了にしました' : '');
   }
-  /**
-   * ボード・移動・マイタスクからステータスを変える入口。完了にするときは、当てはまる確認を順に聞く：
-   * ①子が残っている親 → 子もまとめて完了にするか ②最後の子 → 親も完了にするか ③最後のタスク → プロジェクトも完了にするか
-   */
+  /** ボード・移動・マイタスクからステータスを変える入口。完了にするとき、連動があれば1回だけ聞く */
   function changeStatus(id, st, opts) {
     var it = itemById(id);
     if (!it) return;
-    if (st !== 'done') { quickSave(id, { status: st }, opts); return; }
-    var choice = {}, nKids = openKids(id).length;
-    var cancel = function () { render(); };
-    (function next() {
-      var kids = openKids(id);
-      if (kids.length && choice.kids === undefined) { askCompleteKids(it, kids, function (v) { choice.kids = v; next(); }, cancel); return; }
-      var par = parentToClose(it);
-      if (par && choice.parent === undefined) { askCompleteParent(it, par, function (v) { choice.parent = v; next(); }, cancel); return; }
-      var p = projectToClose(it, choice);
-      if (p && choice.project === undefined) { askCompleteProject(it, p, function (v) { choice.project = v; next(); }, cancel); return; }
+    var list = st === 'done' ? completeScopes(it) : [];
+    if (list.length < 2) { quickSave(id, { status: st }, opts); return; }
+    var nKids = openKids(id).length;
+    askScope('「' + it.name + '」を完了', list, function (choice) {
       var any = choice.kids || choice.parent || choice.project;
       quickSave(id, { status: st }, any ? {
         completeChildren: !!choice.kids, completeParent: !!choice.parent, completeProject: !!choice.project,
         msg: completeMsg(it, choice, nKids)
       } : opts);
-    })();
+    }, function () { render(); });
   }
 
   function quickSave(itemId, patch, opts) {
@@ -2945,17 +2924,10 @@
     var openItems = $('p-status').value === 'done' && p.status !== 'done'
       ? itemsOf(p.project_id).filter(function (x) { return x.status !== 'done'; }) : [];
     if (openItems.length && choice === undefined) {
-      openModal(modalHead('タスクが完了していません') +
-        '<div class="m-body"><p style="margin:0">「' + esc(p.name) + '」には、完了していないタスクが <b>' + openItems.length + ' 件</b>あります（子タスクを含む）。</p>' +
-          '<ul class="kidlist">' + openItems.slice(0, 6).map(function (k) { return '<li>' + esc(k.name) + ' <span class="faint">' + H.STATUS_LABEL[k.status] + '</span></li>'; }).join('') +
-            (openItems.length > 6 ? '<li class="faint">ほか ' + (openItems.length - 6) + ' 件</li>' : '') + '</ul>' +
-          '<div class="kidbtns"><button type="button" class="btn primary" id="pj-all">すべて完了にする</button>' +
-            '<button type="button" class="btn" id="pj-only">プロジェクトのみ完了にする</button>' +
-            '<button type="button" class="btn ghost" id="pj-cancel">やめる</button></div>' +
-          '<p class="help">「すべて完了にする」は、タスク・子タスクのステータスも完了にします</p></div>');
-      $('pj-all').onclick = function () { closeModal(); saveProjectSettings(true); };
-      $('pj-only').onclick = function () { closeModal(); saveProjectSettings(false); };
-      $('pj-cancel').onclick = closeModal;
+      askScope('「' + p.name + '」を完了', [
+        { label: 'プロジェクトだけ', choice: false },
+        { label: '残りのタスク ' + openItems.length + ' 件も', sub: openItems.map(function (k) { return k.name; }).join('、'), choice: true }
+      ], function (all) { saveProjectSettings(all); });
       return;
     }
     var btns = document.querySelectorAll('[data-psave]');
@@ -3274,58 +3246,35 @@
     document.body.style.overflow = '';
   }
 
-  /** 編集の小窓の下の帯に選択肢を出す。「戻る」で元のボタンに戻す（入力した内容はそのまま） */
-  function footAsk(html, choices) {
+  /** 編集の小窓の下の帯に「どこまで完了にしますか？」を出す。「戻る」で元のボタンに戻す（入力した内容はそのまま） */
+  function footScope(list, ok) {
     var foot = document.querySelector('#modal .m-foot');
     Array.prototype.forEach.call(foot.children, function (el) { el.hidden = true; });
     var ask = document.createElement('div');
     ask.className = 'kidask';
-    ask.innerHTML = '<p>' + html + '</p><div class="kidbtns">' + choices.map(function (ch, i) {
-        return '<button type="button" class="btn' + (i === 0 ? ' primary' : '') + '" data-fa="' + i + '">' + ch[0] + '</button>';
-      }).join('') + '<button type="button" class="btn ghost" data-fa="back">戻る</button></div>';
+    ask.innerHTML = '<p class="scope-q">どこまで完了にしますか？</p>' + scopeRadios(list, 'fscope') +
+      '<div class="kidbtns"><span class="spacer"></span><button type="button" class="btn" data-fa="back">戻る</button>' +
+      '<button type="button" class="btn primary" data-fa="ok">完了にして保存</button></div>';
     foot.appendChild(ask);
     ask.addEventListener('click', function (e) {
       var b = e.target.closest('[data-fa]');
       if (!b) return;
+      var v = Number((ask.querySelector('input[name="fscope"]:checked') || {}).value || 0);
       ask.remove();
-      var k = b.getAttribute('data-fa');
-      if (k === 'back') { Array.prototype.forEach.call(foot.children, function (el) { el.hidden = false; }); return; }
-      choices[Number(k)][1]();
+      if (b.getAttribute('data-fa') === 'back') { Array.prototype.forEach.call(foot.children, function (el) { el.hidden = false; }); return; }
+      ok(list[v].choice);
     });
   }
 
   function saveTask(item, isNew, hasKids, choice) {
-    choice = choice || {};
     var toDone = !isNew && $('t-status').value === 'done' && item.status !== 'done';
-    // 子が残っている親を完了にするとき：子もまとめて完了にするか（Backlog と同じ）
-    var kidsLeft = toDone ? openKids(item.item_id) : [];
-    if (kidsLeft.length && choice.kids === undefined) {
-      footAsk('完了していない子タスクが <b>' + kidsLeft.length + ' 件</b>あります', [
-        ['すべて完了にする', function () { saveTask(item, isNew, hasKids, { kids: true }); }],
-        ['親タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, { kids: false }); }]
-      ]);
+    var list = toDone && !choice ? completeScopes(item) : [];
+    if (list.length > 1) {
+      footScope(list, function (ch) { saveTask(item, isNew, hasKids, ch); });
       return;
     }
-    // 最後の子タスクを完了にするとき：親タスクも完了にするか
-    var with_ = function (k, v) { var c2 = {}; Object.keys(choice).forEach(function (x) { c2[x] = choice[x]; }); c2[k] = v; return c2; };
-    var par = toDone ? parentToClose(item) : null;
-    if (par && choice.parent === undefined) {
-      footAsk('親タスク「<b>' + esc(par.name) + '</b>」の子タスクがすべて完了になります', [
-        ['親タスクも完了にする', function () { saveTask(item, isNew, hasKids, with_('parent', true)); }],
-        ['子タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, with_('parent', false)); }]
-      ]);
-      return;
-    }
-    // 最後のタスクを完了にするとき：プロジェクトも完了にするか
-    var pj = toDone ? projectToClose(item, choice) : null;
-    if (pj && choice.project === undefined) {
-      footAsk('プロジェクト「<b>' + esc(pj.name) + '</b>」のタスクがすべて完了になります', [
-        ['プロジェクトも完了にする', function () { saveTask(item, isNew, hasKids, with_('project', true)); }],
-        ['タスクのみ完了にする', function () { saveTask(item, isNew, hasKids, with_('project', false)); }]
-      ]);
-      return;
-    }
-    var chosen = choice.kids !== undefined || choice.parent !== undefined || choice.project !== undefined;
+    var chosen = !!choice;
+    choice = choice || {};
     var payload = {
       name: $('t-name').value,
       description: $('t-desc').value,
