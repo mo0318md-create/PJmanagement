@@ -403,10 +403,12 @@ select.qs { width: 100%; min-height: 36px; padding: 0 30px 0 10px; font-size: 13
 .board-col-body { display: flex; flex-direction: column; gap: 8px; }
 .tcard { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; cursor: grab; }
 .tcard:hover { border-color: var(--ink3); }
-.tcard .top { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink3); min-width: 0; }
+.tcard .top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11.5px; color: var(--ink3); min-width: 0; }
+.tcard .top .mono { overflow: hidden; text-overflow: ellipsis; }
+.tcard .top .badge { margin-left: auto; }
 .tcard .t { font-weight: 700; font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
 .tcard .par { font-size: 11.5px; color: var(--ink3); margin-top: -4px; }
-.tcard .foot { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); min-width: 0; }
+.tcard .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--ink2); min-width: 0; }
 .tcard .acts { display: flex; gap: 8px; }
 .tcard .acts .btn { flex: 1; }
 
@@ -732,7 +734,7 @@ body.is-dragging, body.is-dragging * { -webkit-user-select: none; user-select: n
   .views .seg { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
   .views .btn.primary { display: none; }
   .row2 { grid-template-columns: minmax(0, 1fr); }
-  .board { display: flex; flex-direction: column; }
+  .board { display: flex; flex-direction: column; align-items: stretch; }   /* 列を縦に積むときは、カードを横いっぱいに（PC の grid では align-items: start のまま） */
   .ov-side { display: flex; }
   .ov-side .first { order: -1; }
   .modal {
