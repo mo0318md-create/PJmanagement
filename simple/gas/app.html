@@ -346,6 +346,14 @@
     if (lgb) { S.listGroupBy = lgb.getAttribute('data-lgb'); render(); return; }
     var bcol = t.closest('[data-bcol]');
     if (bcol) { S.boardCol = bcol.getAttribute('data-bcol'); render(); return; }
+    var gk = t.closest('[data-gkid]');
+    if (gk) { var gkid = gk.getAttribute('data-gkid'); S.expanded[gkid] = !kidsOpen(gkid); render(); return; }
+    var gka = t.closest('[data-gkidsall]');
+    if (gka) {
+      var on = gka.getAttribute('data-gkidsall') === '1';
+      (S.items || []).forEach(function (x) { if (Number(x.level) === 1) S.expanded[x.item_id] = on; });
+      render(); return;
+    }
     var gu = t.closest('[data-gunit]');
     if (gu) {
       S.gscale = gu.getAttribute('data-gunit');
@@ -757,7 +765,7 @@
       name: (opts.toggle || '') + typeChip(n.item_type) +
         '<a class="nm" data-edit="' + esc(n.item_id) + '">' + (opts.nameHtml || esc(n.name)) + '</a>' + depChips(n) + (opts.extra || ''),
       sub: '<span class="k">' + esc(n.item_key) + '</span>' + (opts.pj ? ' ・ ' + esc(opts.pj) : '') +
-        (parent && (opts.flat || opts.pj) ? ' ・ └ ' + esc(parent.name) : '') +
+        (parent && (opts.flat || opts.pj) ? ' ・ 親：' + esc(parent.name) : '') +
         (n.start_date && n.end_date ? ' ・ <span class="mono">' + shortRange(n.start_date, n.end_date) + '</span>' : ''),
       sub2: esc(userName(n.assignee_user_id) || '未アサイン') + (n.updated_at ? ' ・ <span class="upd-at">' + esc(shortStamp(n.updated_at, n.updated_by_name)) + '</span>' : ''),
       st: badge(calc.health), prog: progBar(calc), due: dueWithDate(calc, n.end_date),
@@ -982,7 +990,9 @@
       var meta = r.metaHtml !== undefined ? r.metaHtml
         : (r.startDate && r.endDate ? shortRange(r.startDate, r.endDate) + ' ・ ' + dueText(c) : '期間未設定') + (r.tag ? ' ・ <span class="nw">' + esc(r.tag) + '</span>' : '');
       if (r.href && itemById(r.href)) meta += depChips(itemById(r.href));
-      var label = '<div class="g-label"><div class="g-name">' + nameHtml + '</div><div class="g-dates">' + meta + '</div></div>';
+      var caret = r.kidCount ? '<button type="button" class="g-kid" data-gkid="' + esc(r.toggleId) + '" aria-expanded="' + !!r.open + '" ' +
+        'aria-label="子タスク ' + r.kidCount + ' 件を' + (r.open ? '閉じる' : '開く') + '">' + ic(r.open ? 'down' : 'right', 13) + r.kidCount + '</button>' : '';
+      var label = '<div class="g-label"><div class="g-name">' + nameHtml + caret + '</div><div class="g-dates">' + meta + '</div></div>';
       if (!r.startDate || !r.endDate) {
         return '<div class="g-row lv' + (r.level || 1) + '">' + label + '<div class="g-track">' + lines + todayLine + '</div></div>';
       }
@@ -1045,6 +1055,8 @@
       }
       return '<div class="gm-row' + (Number(r.level) === 2 ? ' lv2' : '') + '">' +
         '<div class="gm-n">' + (r.href ? '<a data-edit="' + esc(r.href) + '">' + esc(r.name) + '</a>' : '<b>' + esc(r.name) + '</b>') +
+          (r.kidCount ? '<button type="button" class="g-kid" data-gkid="' + esc(r.toggleId) + '" aria-expanded="' + !!r.open + '" ' +
+            'aria-label="子タスク ' + r.kidCount + ' 件を' + (r.open ? '閉じる' : '開く') + '">' + ic(r.open ? 'down' : 'right', 13) + r.kidCount + '</button>' : '') +
           '<span class="gm-d">' + (r.startDate && r.endDate ? shortRange(r.startDate, r.endDate) + ' ・ ' + dueText(c) : '') + '</span>' +
           (r.href && itemById(r.href) && depIds(itemById(r.href)).length ? '<span class="gm-dep">' + depChips(itemById(r.href)) + '</span>' : '') + '</div>' +
         track(r.startDate, r.endDate, c, r.href ? 'item:' + r.href : '') +
@@ -1244,8 +1256,15 @@
       });
       if (open) {
         tree.children.forEach(function (t) {
+          var kids = t.children.filter(function (s) { return S.portfolioShowDone || s.node.status !== 'done'; });
+          var kopen = kids.length > 0 && kidsOpen(t.node.item_id);
           rows.push({ name: t.node.name, itemType: t.node.item_type, level: 1,
+            kidCount: kids.length, open: kopen, toggleId: t.node.item_id,
             startDate: t.node.start_date, endDate: t.node.end_date, calc: t.calc, href: t.node.item_id, tag: userName(t.node.assignee_user_id) });
+          if (kopen) kids.forEach(function (s) {
+            rows.push({ name: s.node.name, itemType: s.node.item_type, level: 2,
+              startDate: s.node.start_date, endDate: s.node.end_date, calc: s.calc, href: s.node.item_id, tag: userName(s.node.assignee_user_id) });
+          });
         });
       }
     });
@@ -1394,7 +1413,7 @@
       return '<div class="tcard"' + (phone ? '' : ' data-drag="' + esc(x.item_id) + '" data-edit="' + esc(x.item_id) + '"') + '>' +
         '<div class="top">' + typeChip(x.item_type) + '<span class="mono">' + esc(x.item_key) + '</span><span class="spacer"></span>' + badge(calc.health) + '</div>' +
         '<div class="t">' + (phone ? '<a data-edit="' + esc(x.item_id) + '" style="color:inherit">' + esc(x.name) + '</a>' : esc(x.name)) + '</div>' +
-        (parent ? '<div class="par">└ ' + esc(parent.name) + '</div>' : '') +
+        (parent ? '<div class="par">親：' + esc(parent.name) + '</div>' : '') +
         (depIds(x).length ? '<div class="dline">' + depChips(x) + '</div>' : '') +
         '<div class="foot">' + assignee(x.assignee_user_id) + '<span class="spacer"></span>' + dueWithDate(calc, x.end_date, true) + '</div>' + progBar(calc) +
         (phone ? '<div class="acts"><button type="button" class="btn sm" data-edit="' + esc(x.item_id) + '">開く</button>' +
@@ -1460,20 +1479,25 @@
     var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
     var showDone = S.ganttShowDone !== false;
     var rows = [];
+    var anyOpen = false;
     tree.children.forEach(function (t) {
+      var kids = t.children.filter(function (s) { return showDone || s.node.status !== 'done'; });
+      var open = kids.length > 0 && kidsOpen(t.node.item_id);
+      if (open) anyOpen = true;
       if (showDone || t.node.status !== 'done') {
         rows.push({ name: t.node.name, itemType: t.node.item_type, level: 1,
-          startDate: t.node.start_date, endDate: t.node.end_date, calc: t.calc, href: t.node.item_id, tag: userName(t.node.assignee_user_id) });
+          startDate: t.node.start_date, endDate: t.node.end_date, calc: t.calc, href: t.node.item_id, tag: userName(t.node.assignee_user_id),
+          kidCount: kids.length, open: open, toggleId: t.node.item_id });
       }
-      t.children.forEach(function (s) {
-        if (showDone || s.node.status !== 'done') {
-          rows.push({ name: s.node.name, itemType: s.node.item_type, level: 2,
-            startDate: s.node.start_date, endDate: s.node.end_date, calc: s.calc, href: s.node.item_id, tag: userName(s.node.assignee_user_id) });
-        }
+      if (open) kids.forEach(function (s) {
+        rows.push({ name: s.node.name, itemType: s.node.item_type, level: 2,
+          startDate: s.node.start_date, endDate: s.node.end_date, calc: s.calc, href: s.node.item_id, tag: userName(s.node.assignee_user_id) });
       });
     });
+    var hasKids = tree.children.some(function (t) { return t.children.length > 0; });
     return '<div class="bar">' +
         '<button type="button" class="chip' + (showDone ? ' on' : '') + '" data-sflag="ganttShowDone" aria-pressed="' + showDone + '">完了も表示</button>' +
+        (hasKids ? '<button type="button" class="chip" data-gkidsall="' + (anyOpen ? '0' : '1') + '">' + (anyOpen ? '子タスクを閉じる' : '子タスクを開く') + '</button>' : '') +
         '<span class="spacer"></span>' + countHtml(rows.map(function (r) { return { level: r.level }; }), showDone ? '全' : '表示') + '</div>' +
       ganttBlock(rows, { today: S.today, labelHead: 'タスク（期間）' });
   }

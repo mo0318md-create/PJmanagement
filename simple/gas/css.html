@@ -863,4 +863,9 @@ body.is-dragging svg.g-links { opacity: .25; }
 .btn.wide { width: 100%; justify-content: center; }
 .linkish { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .card-body > .help { margin-top: 8px; }
+
+/* ガント：親タスクの子を開く／閉じる */
+.g-kid { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 6px 0 3px; margin-left: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink2); font-family: var(--f-mono); font-size: 11px; flex-shrink: 0; }
+.g-kid:hover { background: var(--sunken); color: var(--ink); }
+@media (pointer: coarse) { .g-kid { height: 30px; padding: 0 10px 0 6px; font-size: 12px; } }
 </style>
