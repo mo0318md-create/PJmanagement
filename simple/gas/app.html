@@ -1549,10 +1549,10 @@
    * 親フォルダが未設定のときは、編集画面でURLを貼る案内を出す（Drive の権限が無くても使えるように）
    */
   function driveCard(p) {
-    var has = !!p.drive_folder_id;
+    var has = !!p.drive_folder_url;
     var body;
     if (has) {
-      body = '<a class="btn primary wide" id="dv-open" href="https://drive.google.com/drive/folders/' + esc(p.drive_folder_id) + '" target="_blank" rel="noopener">' +
+      body = '<a class="btn primary wide" id="dv-open" href="' + esc(p.drive_folder_url) + '" target="_blank" rel="noopener">' +
         ic('folder', 16) + '資料フォルダを開く' + ic('ext', 14) + '</a>';
     } else if (S.driveReady) {
       body = '<button type="button" class="btn wide" data-dvnew="' + esc(p.project_id) + '">' + ic('folder', 16) + 'フォルダを作る</button>' +
@@ -2989,7 +2989,7 @@
         '</div></div>' +
       '<div class="fsec"><h3>資料フォルダ</h3>' +
         '<div class="field"><label for="p-drive">Drive のフォルダ</label>' +
-          '<input id="p-drive" type="text" value="' + (p.drive_folder_id ? 'https://drive.google.com/drive/folders/' + esc(p.drive_folder_id) : '') + '" placeholder="Drive で「リンクをコピー」して貼り付け">' +
+          '<input id="p-drive" type="text" value="' + esc(p.drive_folder_url || '') + '" placeholder="Drive で「リンクをコピー」して貼り付け">' +
           '<p class="help">貼り付けて保存すると、概要から開けるようになります。空にすると外れます' +
             (S.driveReady ? '（概要の「フォルダを作る」で自動で作ることもできます）' : '') + '</p></div></div>' +
       '<div class="fsec"><div id="p-custom"></div></div>' +
@@ -3007,7 +3007,7 @@
     beginSave('p:' + pid);
     runServer('openProjectFolder', pid).then(function (r) {
       endSave('p:' + pid);
-      p.drive_folder_id = r.folder_id;
+      p.drive_folder_url = r.url;
       render();
       doneToast(r.created ? '資料フォルダを作りました' : '資料フォルダを開きます');
       window.open(r.url, '_blank', 'noopener');

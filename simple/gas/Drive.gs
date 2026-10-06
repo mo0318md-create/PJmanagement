@@ -30,7 +30,11 @@ function folderName_(p) {
   return '[' + String(p.key || '').trim() + '] ' + String(p.name || '').trim();
 }
 
-function folderUrl_(id) { return 'https://drive.google.com/drive/folders/' + id; }
+/** 貼られた文字列からフォルダのIDを取り出す（URL でも ID でもよい） */
+function folderIdFromUrl_(s) {
+  var m = String(s || '').match(/[-\w]{25,}/);
+  return m ? m[0] : '';
+}
 
 /**
  * 資料フォルダを開く。無ければ作ってから返す。
@@ -43,10 +47,10 @@ function openProjectFolder(projectId) {
     if (!p) throw new Error('プロジェクトが見つかりません');
 
     // すでにあれば、それが今も開けるかだけ確かめて返す
-    if (p.drive_folder_id) {
+    if (p.drive_folder_url) {
       try {
-        var f = DriveApp.getFolderById(p.drive_folder_id);
-        if (!f.isTrashed()) return { url: folderUrl_(p.drive_folder_id), folder_id: p.drive_folder_id, created: false };
+        var f = DriveApp.getFolderById(folderIdFromUrl_(p.drive_folder_url));
+        if (!f.isTrashed()) return { url: f.getUrl(), created: false };
       } catch (e) {
         throw new Error('登録されている資料フォルダを開けません。' +
           '消されたか、共有されていない可能性があります。プロジェクトの編集で登録し直してください。');
@@ -68,8 +72,9 @@ function openProjectFolder(projectId) {
     if (it.hasNext()) folder = it.next();
     else folder = root.createFolder(name);
 
-    updateRow_('projects', p.project_id, stampEdit_({ drive_folder_id: folder.getId() }, me));
-    return { url: folderUrl_(folder.getId()), folder_id: folder.getId(), created: true };
+    var url = folder.getUrl();   // Drive が返す URL をそのまま持つ（自分で組み立てない）
+    updateRow_('projects', p.project_id, stampEdit_({ drive_folder_url: url }, me));
+    return { url: url, created: true };
   });
 }
 
@@ -80,13 +85,10 @@ function setProjectFolder(projectId, urlOrId) {
     var p = findById_('projects', projectId);
     if (!p) throw new Error('プロジェクトが見つかりません');
     var s = String(urlOrId || '').trim();
-    var id = '';
-    if (s) {
-      var m = s.match(/[-\w]{25,}/);
-      if (!m) throw new Error('フォルダのURLが読み取れません。Drive でフォルダを開いて「リンクをコピー」した文字列を貼ってください。');
-      id = m[0];
+    if (s && !folderIdFromUrl_(s)) {
+      throw new Error('フォルダのURLが読み取れません。Drive でフォルダを開いて「リンクをコピー」した文字列を貼ってください。');
     }
-    updateRow_('projects', p.project_id, stampEdit_({ drive_folder_id: id }, me));
-    return { ok: true, folder_id: id, url: id ? folderUrl_(id) : '' };
+    updateRow_('projects', p.project_id, stampEdit_({ drive_folder_url: s }, me));
+    return { ok: true, url: s };
   });
 }

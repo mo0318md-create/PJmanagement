@@ -127,7 +127,7 @@ settings       （key-value。1行1設定）
 | end_date | date | ○ | | start_date 以上であること |
 | custom_fields | json | | {} | 設定項目の値。キーは field_defs の key。例: `{"client_name":"株式会社ABC","budget":480}` |
 | field_defs | json | | （空欄） | 設定項目の定義。`[{key,label,type,options,required,source}]`。type は `text`/`number`/`date`/`select`/`checkbox`。source は `template`（作成時にテンプレートからコピー。名前・型・必須は変えられない）/ `project`（そのプロジェクトで足した項目）。**作成時にコピーするので、テンプレートを後で変えても遡及しない**。空欄の古い行は、テンプレートの定義と値のキー（文字型）から組み立てて扱い、次に保存したときに埋まる |
-| drive_folder_id | str | | | Drive の資料フォルダID（要件 F-5-17）。空なら未登録 |
+| drive_folder_url | str | | | Drive の資料フォルダの**URL**（要件 F-5-17）。空なら未登録。自動で作ったときは Drive が返す URL、手で登録したときは貼られた URL をそのまま持つ（URLを組み立てない）。IDが要るときはURLから取り出す |
 | next_item_seq | int | ○ | 1 | タスクキーの次の連番 |
 | created_at | ts | ○ | | |
 | updated_at | ts | ○ | | 衝突検知に使う（§5.1）。プロジェクトの設定を変えたときだけ進める（タスクの追加では進めない） |
