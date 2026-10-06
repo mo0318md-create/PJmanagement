@@ -27,7 +27,7 @@
     // ③ 概要の絞り込み（F-3-9）
     df: { delayedOnly: false },
     // ④ボード・⑤リスト・⑥ガントの表示設定
-    boardAssignee: '', boardCol: 'in_progress', listGroupBy: 'status', ganttShowDone: true,
+    boardAssignee: '', boardCol: 'in_progress', listGroupBy: 'tree', ganttShowDone: true,
     // ⑪担当者一覧の並び順、⑫担当者別ガントの表示設定
     peopleSort: 'delayed', peopleGanttUser: '', peopleGanttGroupByProject: true, peopleGanttShowDone: false,
     // ②全プロジェクトのガント
@@ -342,6 +342,14 @@
     var pfc = t.closest('[data-pfclear]');
     if (pfc) { var ck = pfc.getAttribute('data-pfclear'); if (ck === 'done') S.pf.done = false; else S.pf[ck] = ''; render(); return; }
     // 切替ボタン（まとめ方・目盛り・ボードの列・スマホのガントの範囲）
+    var gl = t.closest('[data-golist]');
+    if (gl) {
+      // 概要の件数を押したら、その状態で絞ったリストへ
+      var gk = gl.getAttribute('data-golist');
+      S.df.delayedOnly = gk === 'delayed';
+      S.listGroupBy = gk === 'delayed' ? 'tree' : 'status';
+      S.tab = 'list'; render(); window.scrollTo(0, 0); replaceUrl(); return;
+    }
     var lgb = t.closest('[data-lgb]');
     if (lgb) { S.listGroupBy = lgb.getAttribute('data-lgb'); render(); return; }
     var bcol = t.closest('[data-bcol]');
@@ -1327,17 +1335,7 @@
   /** ③ 概要：左にタスクの木、右に「要対応」「最近の更新」「設定項目」 */
   function projectOverview(p) {
     var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
-    var rows = '';
-    tree.children.forEach(function (t) {
-      var kids = t.children.filter(function (s) { return !S.df.delayedOnly || s.calc.health === 'delayed'; });
-      if (S.df.delayedOnly && t.calc.health !== 'delayed' && !kids.length) return;
-      var open = kidsOpen(t.node.item_id) && kids.length > 0;
-      // 親タスクとその子タスクを1つの枠にまとめる（枠と枠の間はすき間で区切る）
-      var fam = treeRow(t, 1, open ? 'par' : '');
-      if (open) kids.forEach(function (s, i) { fam += treeRow(s, 2, 'kid' + (i === kids.length - 1 ? ' last' : '')); });
-      rows += '<div class="fam">' + fam + '</div>';
-    });
-    var anyOpen = tree.children.some(function (t) { return t.children.length && kidsOpen(t.node.item_id); });
+    var flat = H.flatten(tree);
 
     var late = H.flatten(tree).filter(function (r) { return r.calc.health === 'delayed'; });
     var alert = '<section class="card clip' + (late.length ? ' first' : '') + '"><div class="card-head"><h2>要対応</h2>' +
@@ -1360,15 +1358,31 @@
           }).join('') + '</div>'
         : emptyBox('まだ更新はありません')) + '</section>';
 
-    return '<div class="ov"><div class="ov-main">' +
-        '<div class="bar">' +
-          '<button type="button" class="chip' + (S.df.delayedOnly ? ' on' : '') + '" data-sflag="df.delayedOnly" aria-pressed="' + S.df.delayedOnly + '">遅延だけ表示</button>' +
-          '<button type="button" class="chip" data-collapse-all>' + (anyOpen ? 'すべて折りたたむ' : 'すべて開く') + '</button>' +
-          '<span class="spacer"></span>' + countHtml(itemsOf(p.project_id)) + '</div>' +
-        '<div class="rows fams">' + (rows ? rowHead('タスク') + rows
-          : emptyBox(S.df.delayedOnly ? '遅れているタスクはありません' : 'タスクがありません',
-              S.df.delayedOnly ? '' : '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>' +
-      '</div><div class="ov-side">' + alert + feed + driveCard(p) + customFieldsCard(p) + '</div></div>';
+    // タスクの一覧は「リスト」に任せる（概要は、いまどうなっているかを見る画面）
+    var cnt = { delayed: 0, in_progress: 0, not_started: 0, on_hold: 0, done: 0 };
+    flat.forEach(function (r) {
+      if (r.calc.health === 'delayed') cnt.delayed++;
+      if (cnt[r.node.status] !== undefined) cnt[r.node.status]++;
+    });
+    var box = function (k, label, n, cls) {
+      return '<button type="button" class="sum-t' + (cls || '') + (n ? '' : ' zero') + '" data-golist="' + k + '">' +
+        '<b>' + n + '<small> 件</small></b><span>' + label + '</span></button>';
+    };
+    var sum = '<div class="card"><div class="card-head"><h2>タスクの状況</h2><span class="spacer"></span>' +
+        countHtml(flat) + '</div><div class="card-body">' +
+        '<div class="sum-tasks">' +
+          box('delayed', '遅延', cnt.delayed, cnt.delayed ? ' late' : '') +
+          box('in_progress', '進行中', cnt.in_progress) +
+          box('not_started', '未着手', cnt.not_started) +
+          box('on_hold', '保留', cnt.on_hold) +
+          box('done', '完了', cnt.done) +
+        '</div>' +
+        '<div class="sum-acts"><button type="button" class="btn" data-tab="list">' + ic('proj', 15) + 'タスクの一覧へ</button>' +
+          '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 15) + 'タスクを追加</button></div>' +
+      '</div></div>';
+
+    return '<div class="ov"><div class="ov-main">' + sum + alert + '</div>' +
+      '<div class="ov-side">' + feed + driveCard(p) + customFieldsCard(p) + '</div></div>';
   }
 
   /** 子タスクを開いているか。既定は閉じる。「遅延だけ表示」のときは、遅れた子が見えるよう開く */
@@ -1449,7 +1463,26 @@
   function projectList(p) {
     var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
     var flat = H.flatten(tree);
-    var mode = S.listGroupBy || 'status';
+    var mode = S.listGroupBy || 'tree';
+    // 親子：概要にあったツリーをここに移した。親とその子を1つの枠にまとめる
+    if (mode === 'tree') {
+      var rows = '';
+      tree.children.forEach(function (t) {
+        var kids = t.children.filter(function (s) { return !S.df.delayedOnly || s.calc.health === 'delayed'; });
+        if (S.df.delayedOnly && t.calc.health !== 'delayed' && !kids.length) return;
+        var open = kidsOpen(t.node.item_id) && kids.length > 0;
+        var fam = treeRow(t, 1, open ? 'par' : '');
+        if (open) kids.forEach(function (s, i) { fam += treeRow(s, 2, 'kid' + (i === kids.length - 1 ? ' last' : '')); });
+        rows += '<div class="fam">' + fam + '</div>';
+      });
+      var anyOpen = tree.children.some(function (t) { return t.children.length && kidsOpen(t.node.item_id); });
+      return listBar(p, mode, flat,
+          '<button type="button" class="chip' + (S.df.delayedOnly ? ' on' : '') + '" data-sflag="df.delayedOnly" aria-pressed="' + S.df.delayedOnly + '">遅延だけ表示</button>' +
+          '<button type="button" class="chip" data-collapse-all>' + (anyOpen ? 'すべて折りたたむ' : 'すべて開く') + '</button>') +
+        '<div class="rows fams">' + (rows ? rowHead('タスク') + rows
+          : emptyBox(S.df.delayedOnly ? '遅れているタスクはありません' : 'タスクがありません',
+              S.df.delayedOnly ? '' : '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>';
+    }
     var groups;
     if (mode === 'status') {
       groups = H.STATUS_ORDER.map(function (st) { return { label: H.STATUS_LABEL[st], rows: flat.filter(function (r) { return r.node.status === st; }) }; });
@@ -1466,12 +1499,17 @@
       return '<div class="row grp"><span><span class="k">' + prefix + '：</span>' + esc(g.label) + '</span><span class="c">' + g.rows.length + ' 件</span></div>' +
         g.rows.map(function (r) { return taskRow(r.node, r.calc, { flat: true }); }).join('');
     }).join('');
-    return '<div class="bar"><span class="help">まとめ方</span><div class="seg">' +
-        [['status', 'ステータス'], ['assignee', '担当者'], ['type', '種別']].map(function (m) {
-          return '<button type="button" data-lgb="' + m[0] + '" class="' + (mode === m[0] ? 'active' : '') + '">' + m[1] + '</button>';
-        }).join('') + '</div><span class="spacer"></span>' + countHtml(flat) + '</div>' +
+    return listBar(p, mode, flat, '') +
       '<div class="rows">' + (body ? rowHead('タスク') + body
         : emptyBox('タスクがありません', '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>';
+  }
+
+  /** リストの上の帯（まとめ方の切り替え）。extra はまとめ方ごとに足すボタン */
+  function listBar(p, mode, flat, extra) {
+    return '<div class="bar"><span class="help">まとめ方</span><div class="seg">' +
+        [['tree', '親子'], ['status', 'ステータス'], ['assignee', '担当者'], ['type', '種別']].map(function (m) {
+          return '<button type="button" data-lgb="' + m[0] + '" class="' + (mode === m[0] ? 'active' : '') + '">' + m[1] + '</button>';
+        }).join('') + '</div>' + extra + '<span class="spacer"></span>' + countHtml(flat) + '</div>';
   }
 
   /** ⑥ ガント：1プロジェクト内のタスクを時間軸で見る */

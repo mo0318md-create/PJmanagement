@@ -868,4 +868,17 @@ body.is-dragging svg.g-links { opacity: .25; }
 .g-kid { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 6px 0 3px; margin-left: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink2); font-family: var(--f-mono); font-size: 11px; flex-shrink: 0; }
 .g-kid:hover { background: var(--sunken); color: var(--ink); }
 @media (pointer: coarse) { .g-kid { height: 30px; padding: 0 10px 0 6px; font-size: 12px; } }
+
+/* 概要：タスクの状況（件数を押すとリストへ） */
+.sum-tasks { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
+.sum-t { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; min-height: 60px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); text-align: left; }
+.sum-t:hover { border-color: var(--ink3); background: var(--sunken); }
+.sum-t b { font-family: var(--f-mono); font-weight: 500; font-size: 20px; line-height: 1.2; }
+.sum-t b small { font-family: var(--f-body); font-size: 11.5px; color: var(--ink3); font-weight: 400; }
+.sum-t span { font-size: 12px; color: var(--ink3); }
+.sum-t.zero b { color: var(--ink3); }
+.sum-t.late { border-color: color-mix(in srgb, var(--late) 45%, var(--line)); background: color-mix(in srgb, var(--late-bg) 55%, var(--surface)); }
+.sum-t.late b, .sum-t.late span, .sum-t.late b small { color: var(--late); }
+.sum-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.sum-acts .btn { flex: 1 1 auto; justify-content: center; }
 </style>
