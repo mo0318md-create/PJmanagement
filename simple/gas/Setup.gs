@@ -8,6 +8,12 @@
  *   4. 試したい場合は seedSampleData() を実行する → 見本のデータが入る
  *   5. installDailyTrigger() を実行する → 毎朝のお知らせ作りを仕掛ける
  *   6. 「デプロイ」→「新しいデプロイ」→ 種類「ウェブアプリ」で公開する
+ *
+ * スクリプトプロパティ（プロジェクトの設定 ▸ スクリプト プロパティ で入れる）
+ *   SPREADSHEET_ID        … データを置くスプレッドシートのID（必須）
+ *   COMMON_MASTER_SS_ID   … 共通マスタ（社員・所属）のスプレッドシートのID
+ *   DRIVE_ROOT_FOLDER_ID  … 資料フォルダを置く親フォルダのID（F-5-17）
+ *                           入れたら checkDriveRoot() を実行して、正しいか確かめる
  */
 
 /**
@@ -142,6 +148,56 @@ function seedSampleData() {
 
   SpreadsheetApp.flush();
   return 'テンプレート「Webサイト制作」と、ユーザー ' + users.length + ' 名を入れました';
+}
+
+/**
+ * 資料フォルダの親フォルダ（DRIVE_ROOT_FOLDER_ID）が正しく入っているか確かめる。
+ * 入れたあとに1度実行して、出てきた文章を読む。
+ */
+function checkDriveRoot() {
+  var id = PropertiesService.getScriptProperties().getProperty('DRIVE_ROOT_FOLDER_ID');
+  if (!id) {
+    return 'DRIVE_ROOT_FOLDER_ID が入っていません。' +
+      'プロジェクトの設定 ▸ スクリプト プロパティ で、資料フォルダを置く親フォルダのIDを入れてください。';
+  }
+  var folder;
+  try {
+    folder = DriveApp.getFolderById(id);
+  } catch (e) {
+    return 'そのIDのフォルダを開けません（入っている値：' + id + '）。' +
+      'IDが違うか、このアカウントに共有されていません。' +
+      'Drive でフォルダを開いたときのURLの folders/ のうしろを入れてください。';
+  }
+
+  var out = ['フォルダ名：' + folder.getName(), 'URL：' + folder.getUrl()];
+  // 共有ドライブの中にあるか（親をたどれなければ共有ドライブの直下）
+  var inShared = false;
+  try {
+    var parents = folder.getParents();
+    inShared = !parents.hasNext();
+  } catch (e) { inShared = true; }
+
+  if (inShared) {
+    out.push('置き場所：共有ドライブの中とみられます。全員が開けるので、このまま使えます。');
+  } else {
+    var access = String(folder.getSharingAccess());
+    if (access === 'DOMAIN' || access === 'DOMAIN_WITH_LINK' || access === 'ANYONE' || access === 'ANYONE_WITH_LINK') {
+      out.push('置き場所：個人のドライブですが、組織に共有されています（' + access + '）。使えます。');
+    } else {
+      out.push('⚠ 置き場所：個人のドライブで、組織に共有されていません（' + access + '）。' +
+        'このままだと、フォルダを作った人以外は開けません。' +
+        '共有ドライブに移すか、このフォルダを nazatec.co.jp 全員に共有してください。');
+    }
+  }
+  // 書き込めるかどうか（フォルダを作れないと意味がない）
+  try {
+    var t = folder.createFolder('__確認用（すぐ消します）__');
+    t.setTrashed(true);
+    out.push('書き込み：できます。設定は完了です。');
+  } catch (e) {
+    out.push('⚠ 書き込み：できません。このフォルダへの編集権限がありません。');
+  }
+  return out.join('\n');
 }
 
 /** 毎朝のトリガーを仕掛ける（二重に作らない） */
