@@ -28,6 +28,7 @@
     df: { delayedOnly: false },
     // ④ボード・⑤リスト・⑥ガントの表示設定
     boardAssignee: '', boardCol: 'in_progress', listGroupBy: 'tree', ganttShowDone: true,
+    showKids: false,   // 子タスクを出すか。既定は出さない（全ページ共通）
     // ⑪担当者一覧の並び順、⑫担当者別ガントの表示設定
     peopleSort: 'delayed', peopleGanttUser: '', peopleGanttGroupByProject: true, peopleGanttShowDone: false,
     // ②全プロジェクトのガント
@@ -324,7 +325,6 @@
     if (sub) { openSubTaskEditor(sub.getAttribute('data-addsub')); return; }
     var tg = t.closest('[data-toggle]');
     if (tg) { var k = tg.getAttribute('data-toggle'); S.expanded[k] = !kidsOpen(k); render(); return; }
-    if (t.closest('[data-collapse-all]')) { collapseAll(); return; }
     var pgtoggle = t.closest('[data-pgtoggle]');
     if (pgtoggle && !t.closest('a, [data-gtap], [data-gbar]')) { var pk = pgtoggle.getAttribute('data-pgtoggle'); S.portfolioOpen[pk] = !S.portfolioOpen[pk]; render(); return; }
     var petoggle = t.closest('[data-petoggle]');
@@ -350,18 +350,13 @@
       S.listGroupBy = gk === 'delayed' ? 'tree' : 'status';
       S.tab = 'list'; render(); window.scrollTo(0, 0); replaceUrl(); return;
     }
+    if (t.closest('[data-showkids]')) { S.showKids = !S.showKids; S.expanded = {}; render(); return; }
     var lgb = t.closest('[data-lgb]');
     if (lgb) { S.listGroupBy = lgb.getAttribute('data-lgb'); render(); return; }
     var bcol = t.closest('[data-bcol]');
     if (bcol) { S.boardCol = bcol.getAttribute('data-bcol'); render(); return; }
     var gk = t.closest('[data-gkid]');
     if (gk) { var gkid = gk.getAttribute('data-gkid'); S.expanded[gkid] = !kidsOpen(gkid); render(); return; }
-    var gka = t.closest('[data-gkidsall]');
-    if (gka) {
-      var on = gka.getAttribute('data-gkidsall') === '1';
-      (S.items || []).forEach(function (x) { if (Number(x.level) === 1) S.expanded[x.item_id] = on; });
-      render(); return;
-    }
     var gu = t.closest('[data-gunit]');
     if (gu) {
       S.gscale = gu.getAttribute('data-gunit');
@@ -1385,16 +1380,19 @@
       '<div class="ov-side">' + feed + driveCard(p) + customFieldsCard(p) + '</div></div>';
   }
 
-  /** 子タスクを開いているか。既定は閉じる。「遅延だけ表示」のときは、遅れた子が見えるよう開く */
-  function kidsOpen(id) { return S.expanded[id] !== undefined ? !!S.expanded[id] : !!S.df.delayedOnly; }
-
-  function collapseAll() {
-    var p = project(S.projectId);
-    if (!p) return;
-    var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
-    var anyOpen = tree.children.some(function (t) { return t.children.length && kidsOpen(t.node.item_id); });
-    tree.children.forEach(function (t) { S.expanded[t.node.item_id] = !anyOpen; });
-    render();
+  /**
+   * 子タスクを出すか。既定は出さない。
+   * 「子タスクも表示」を押すか、その親だけ開いたとき、「遅延だけ表示」のときに出す。
+   */
+  function kidsOpen(id) { return S.expanded[id] !== undefined ? !!S.expanded[id] : (S.showKids || !!S.df.delayedOnly); }
+  /** どの画面にも同じ形で置く「子タスクも表示」のボタン */
+  function kidsChip() {
+    return '<button type="button" class="chip' + (S.showKids ? ' on' : '') + '" data-showkids aria-pressed="' + S.showKids + '">子タスクも表示</button>';
+  }
+  /** 子タスクを出さないときは、一覧から子タスクを外す */
+  function dropKids(list, get) {
+    if (S.showKids) return list;
+    return list.filter(function (x) { return Number((get ? get(x) : x).level) !== 2; });
   }
 
   /** 木の1行。親は名前の下に「子タスク n件（開閉）」「子タスクを追加」のボタン、子は左の線で親につなぐ */
@@ -1414,7 +1412,7 @@
   /** ④ ボード：PC・タブレットは4列（カードをつかんで動かす）、スマホは1列ずつ（「移動」で列を変える） */
   function projectBoard(p) {
     var items = itemsOf(p.project_id);
-    var filtered = S.boardAssignee ? items.filter(function (x) { return x.assignee_user_id === S.boardAssignee; }) : items;
+    var filtered = dropKids(S.boardAssignee ? items.filter(function (x) { return x.assignee_user_id === S.boardAssignee; }) : items);
     var calcOf = function (x) {
       var kids = items.filter(function (k) { return k.parent_item_id === x.item_id; })
         .map(function (k) { return { node: k, calc: H.evaluate(k, [], S.today) }; });
@@ -1440,7 +1438,8 @@
     var bar = '<div class="bar">' +
         '<select class="chip' + (S.boardAssignee ? ' on' : '') + '" id="bd-assignee" aria-label="担当者">' +
           optionList([['', '担当者：すべて']].concat(S.users.map(function (u) { return [u.user_id, '担当者：' + u.name]; })), S.boardAssignee || '') + '</select>' +
-        '<span class="spacer"></span>' + countHtml(filtered, S.boardAssignee ? '表示' : '全') + '</div>';
+        kidsChip() +
+        '<span class="spacer"></span>' + countHtml(filtered, S.boardAssignee || !S.showKids ? '表示' : '全') + '</div>';
 
     if (phone) {
       var col = H.STATUS_ORDER.indexOf(S.boardCol) >= 0 ? S.boardCol : 'in_progress';
@@ -1475,22 +1474,20 @@
         if (open) kids.forEach(function (s, i) { fam += treeRow(s, 2, 'kid' + (i === kids.length - 1 ? ' last' : '')); });
         rows += '<div class="fam">' + fam + '</div>';
       });
-      var anyOpen = tree.children.some(function (t) { return t.children.length && kidsOpen(t.node.item_id); });
       return listBar(p, mode, flat,
-          '<button type="button" class="chip' + (S.df.delayedOnly ? ' on' : '') + '" data-sflag="df.delayedOnly" aria-pressed="' + S.df.delayedOnly + '">遅延だけ表示</button>' +
-          '<button type="button" class="chip" data-collapse-all>' + (anyOpen ? 'すべて折りたたむ' : 'すべて開く') + '</button>') +
+          '<button type="button" class="chip' + (S.df.delayedOnly ? ' on' : '') + '" data-sflag="df.delayedOnly" aria-pressed="' + S.df.delayedOnly + '">遅延だけ表示</button>') +
         '<div class="rows fams">' + (rows ? rowHead('タスク') + rows
           : emptyBox(S.df.delayedOnly ? '遅れているタスクはありません' : 'タスクがありません',
               S.df.delayedOnly ? '' : '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>';
     }
-    var groups;
+    var groups, shown = dropKids(flat, function (r) { return r.node; });
     if (mode === 'status') {
-      groups = H.STATUS_ORDER.map(function (st) { return { label: H.STATUS_LABEL[st], rows: flat.filter(function (r) { return r.node.status === st; }) }; });
+      groups = H.STATUS_ORDER.map(function (st) { return { label: H.STATUS_LABEL[st], rows: shown.filter(function (r) { return r.node.status === st; }) }; });
     } else if (mode === 'assignee') {
-      groups = S.users.map(function (u) { return { label: u.name, rows: flat.filter(function (r) { return r.node.assignee_user_id === u.user_id; }) }; })
-        .concat([{ label: '未アサイン', rows: flat.filter(function (r) { return !r.node.assignee_user_id; }) }]);
+      groups = S.users.map(function (u) { return { label: u.name, rows: shown.filter(function (r) { return r.node.assignee_user_id === u.user_id; }) }; })
+        .concat([{ label: '未アサイン', rows: shown.filter(function (r) { return !r.node.assignee_user_id; }) }]);
     } else {
-      groups = ['work', 'bug', 'req'].map(function (t) { return { label: H.TYPE_LABEL[t], rows: flat.filter(function (r) { return r.node.item_type === t; }) }; });
+      groups = ['work', 'bug', 'req'].map(function (t) { return { label: H.TYPE_LABEL[t], rows: shown.filter(function (r) { return r.node.item_type === t; }) }; });
     }
     groups = groups.filter(function (g) { return g.rows.length; });
     // まとまりの見出しは「種別：作業　4 件」のように、何でまとめたかを書く
@@ -1499,17 +1496,18 @@
       return '<div class="row grp"><span><span class="k">' + prefix + '：</span>' + esc(g.label) + '</span><span class="c">' + g.rows.length + ' 件</span></div>' +
         g.rows.map(function (r) { return taskRow(r.node, r.calc, { flat: true }); }).join('');
     }).join('');
-    return listBar(p, mode, flat, '') +
+    return listBar(p, mode, shown, '', S.showKids ? '全' : '表示') +
       '<div class="rows">' + (body ? rowHead('タスク') + body
         : emptyBox('タスクがありません', '<button type="button" class="btn primary" data-add="' + esc(p.project_id) + '">' + ic('plus', 16) + 'タスクを追加</button>')) + '</div>';
   }
 
   /** リストの上の帯（まとめ方の切り替え）。extra はまとめ方ごとに足すボタン */
-  function listBar(p, mode, flat, extra) {
+  function listBar(p, mode, flat, extra, label) {
     return '<div class="bar"><span class="help">まとめ方</span><div class="seg">' +
         [['tree', '親子'], ['status', 'ステータス'], ['assignee', '担当者'], ['type', '種別']].map(function (m) {
           return '<button type="button" data-lgb="' + m[0] + '" class="' + (mode === m[0] ? 'active' : '') + '">' + m[1] + '</button>';
-        }).join('') + '</div>' + extra + '<span class="spacer"></span>' + countHtml(flat) + '</div>';
+        }).join('') + '</div>' + kidsChip() + extra +
+        '<span class="spacer"></span>' + countHtml(flat, label || '全') + '</div>';
   }
 
   /** ⑥ ガント：1プロジェクト内のタスクを時間軸で見る */
@@ -1517,11 +1515,9 @@
     var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
     var showDone = S.ganttShowDone !== false;
     var rows = [];
-    var anyOpen = false;
     tree.children.forEach(function (t) {
       var kids = t.children.filter(function (s) { return showDone || s.node.status !== 'done'; });
       var open = kids.length > 0 && kidsOpen(t.node.item_id);
-      if (open) anyOpen = true;
       if (showDone || t.node.status !== 'done') {
         rows.push({ name: t.node.name, itemType: t.node.item_type, level: 1,
           startDate: t.node.start_date, endDate: t.node.end_date, calc: t.calc, href: t.node.item_id, tag: userName(t.node.assignee_user_id),
@@ -1535,8 +1531,8 @@
     var hasKids = tree.children.some(function (t) { return t.children.length > 0; });
     return '<div class="bar">' +
         '<button type="button" class="chip' + (showDone ? ' on' : '') + '" data-sflag="ganttShowDone" aria-pressed="' + showDone + '">完了も表示</button>' +
-        (hasKids ? '<button type="button" class="chip" data-gkidsall="' + (anyOpen ? '0' : '1') + '">' + (anyOpen ? '子タスクを閉じる' : '子タスクを開く') + '</button>' : '') +
-        '<span class="spacer"></span>' + countHtml(rows.map(function (r) { return { level: r.level }; }), showDone ? '全' : '表示') + '</div>' +
+        (hasKids ? kidsChip() : '') +
+        '<span class="spacer"></span>' + countHtml(H.flatten(tree).map(function (r) { return { level: r.node.level }; }), showDone ? '全' : '表示') + '</div>' +
       ganttBlock(rows, { today: S.today, labelHead: 'タスク（期間）' });
   }
 
@@ -1848,7 +1844,7 @@
       '<select class="chip' + (searchState.pj ? ' on' : '') + '" id="s-pj" aria-label="プロジェクト">' + optionList([['', 'プロジェクト：すべて']].concat(S.projects.map(function (p) { return [p.project_id, p.name]; })), searchState.pj) + '</select>' +
       '<select class="chip' + (searchState.who ? ' on' : '') + '" id="s-who" aria-label="担当者">' + optionList([['', '担当者：すべて'], ['@none', '未アサイン']].concat(S.users.map(function (u) { return [u.user_id, u.name]; })), searchState.who) + '</select>' +
       '<select class="chip' + (searchState.status ? ' on' : '') + '" id="s-status" aria-label="ステータス">' + optionList([['', 'ステータス：すべて']].concat(H.STATUS_ORDER.map(function (k) { return [k, H.STATUS_LABEL[k]]; })), searchState.status) + '</select>' +
-      '</div>';
+      kidsChip() + '</div>';
     var pageHead = head('横断検索', '全プロジェクトのタスクをまとめて探します', '');
     if (S.items === null) return pageHead + box + chips + skel(5);
     var q = searchState.text.trim().toLowerCase();
@@ -1857,6 +1853,7 @@
       var tree = H.evaluateTree(p, itemsOf(p.project_id), S.today);
       H.flatten(tree).forEach(function (r) {
         var n = r.node;
+        if (!S.showKids && Number(n.level) === 2) return;
         if (q && (n.name + ' ' + n.item_key).toLowerCase().indexOf(q) < 0) return;
         if (searchState.pj && n.project_id !== searchState.pj) return;
         if (searchState.who === '@none' ? !!n.assignee_user_id : (searchState.who && n.assignee_user_id !== searchState.who)) return;
