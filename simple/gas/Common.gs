@@ -340,9 +340,16 @@ function resolveMe_(pp) {
  */
 function commonMasterStatus() {
   var me = currentUser_();
-  if (!me || me.role !== 'admin') throw new Error('管理者だけが実行できます');
+  if (!me || me.role !== 'admin') {
+    Logger.log('管理者だけが実行できます（いまのアカウント：' + (me ? me.email + '・' + me.role : '未登録') + '）');
+    throw new Error('管理者だけが実行できます');
+  }
   if (!hasCommonMaster_()) {
-    return { 設定: false, 案内: 'スクリプトプロパティ COMMON_MASTER_SS_ID が未設定です。' };
+    var none = { 設定: false,
+      案内: 'スクリプトプロパティ COMMON_MASTER_SS_ID が未設定です。PJ管理は common を読まず、ローカルの担当者一覧で動いています。' +
+        'common を読むには、プロジェクトの設定 ▸ スクリプト プロパティ に COMMON_MASTER_SS_ID（common のスプレッドシートID）を入れてください。' };
+    Logger.log(JSON.stringify(none, null, 2));
+    return none;
   }
   // **診断はキャッシュを見ない**。10分キャッシュしているので、向こうで列を足した直後に
   // 「まだ無い」と答えてしまう。「本当に無いのか、こちらが古いのか」が分からない診断は、無いより悪い。
