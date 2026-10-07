@@ -170,9 +170,9 @@ function saveCommonFallback_(people) {
     var text0 = JSON.stringify(people);
     var digest = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, text0, Utilities.Charset.UTF_8));
     var props = PropertiesService.getScriptProperties();
-    if (props.getProperty('COMMON_FALLBACK_DIGEST') === digest) return;
     var ss = SS_();
     var sh = ss.getSheetByName(COMMON_FALLBACK_SHEET_);
+    if (sh && sh.getLastRow() >= 2 && props.getProperty('COMMON_FALLBACK_DIGEST') === digest) return;
     if (!sh) { sh = ss.insertSheet(COMMON_FALLBACK_SHEET_); sh.hideSheet(); }
     sh.clear();
     sh.getRange(1, 1, 1, 2).setValues([['written_at', 'json']]);
@@ -218,8 +218,10 @@ function commonPeople_() {
       name: String(r['氏名'] || r['社員名'] || '').trim(),
       email: String(r['メールアドレス(xronos)'] || '').trim(),
       deptCode: String(r['所属コード(xronos)'] || '').trim(),
-      deptName: String(r['所属名'] || r['所属'] || '').trim(),
-      positionName: String(r['役職名'] || r['役職'] || '').trim()
+      // 所属名の列は無い（仕様 §3）。NKS と同じくフルパス（例：製造部 空調第一生産課 1係）を使う。
+      // 名称だけだと「1係」が複数の部署にあり見分けられないため
+      deptName: String(r['フルパス'] || r['係'] || r['課'] || r['部門'] || '').trim(),
+      positionName: String(r['役職名(xronos)'] || '').trim()
     };
   }).filter(function (p) { return p.code; });
 }
