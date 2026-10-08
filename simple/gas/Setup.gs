@@ -14,6 +14,9 @@
  *   COMMON_MASTER_SS_ID   … 共通マスタ（社員・所属）のスプレッドシートのID
  *   DRIVE_ROOT_FOLDER_ID  … 資料フォルダを置く親フォルダのID（F-5-17）
  *                           入れたら checkDriveRoot() を実行して、正しいか確かめる
+ *
+ * common を読む前に作ったデータがあるとき
+ *   migrateIdsPreview() で下見 → migrateIdsApply() で、古い人のIDを社員コードに付け替える
  */
 
 /**
@@ -148,6 +151,89 @@ function seedSampleData() {
 
   SpreadsheetApp.flush();
   return 'テンプレート「Webサイト制作」と、ユーザー ' + users.length + ' 名を入れました';
+}
+
+/* ============ common 連携前のIDを社員コードに付け替える ============
+ *
+ * common を読む前は、人をこのアプリの users シートのID（や、メールアドレス）で記録していた。
+ * いまは common の社員コードで人を指すので、古いIDのままの行は「（一覧に無い人）」になる。
+ *
+ * 使い方（どちらもエディタから実行。管理者だけ）
+ *   1. migrateIdsPreview() … 何をどう付け替えるかをログに出すだけ。**1行も書かない**
+ *   2. 中身を確かめたら migrateIdsApply() … 実際に書き換える
+ *
+ * 付け替え方：古いIDから users シートのメールを引き（IDがメールならそのまま）、
+ * common の社員一覧で同じメールの人の社員コードにする。見つからないIDは触らず「未解決」として出す。
+ * 記録の名前（〜_by_name）も common の氏名にそろえる。更新日時は変えない（人の操作ではないため）。
+ */
+var MIGRATE_TARGETS_ = [
+  { sheet: 'projects', cols: [['owner_user_id', null], ['created_by', 'created_by_name'], ['updated_by', 'updated_by_name']] },
+  { sheet: 'items', cols: [['assignee_user_id', null], ['created_by', 'created_by_name'], ['updated_by', 'updated_by_name']] },
+  { sheet: 'templates', cols: [['created_by', 'created_by_name'], ['updated_by', 'updated_by_name']] },
+  { sheet: 'notifications', cols: [['user_id', null]] }
+];
+
+function migrateIdsPreview() { return migrateIds_(false); }
+function migrateIdsApply() { return migrateIds_(true); }
+
+function migrateIds_(apply) {
+  var me = currentUser_();
+  if (!me || me.role !== 'admin') throw new Error('管理者だけが実行できます');
+  if (!hasCommonMaster_()) throw new Error('COMMON_MASTER_SS_ID が未設定です。common を読めるようにしてから実行してください');
+
+  var people = commonPeople_();
+  var codes = {}, byEmail = {};
+  people.forEach(function (p) {
+    codes[p.code] = p;
+    if (p.email) byEmail[p.email.toLowerCase()] = p;
+  });
+  var localEmail = {};
+  readAll_('users').forEach(function (u) { if (u.user_id) localEmail[String(u.user_id)] = String(u.email || '').toLowerCase(); });
+
+  // 古いID → common の人（見つからなければ null）
+  var map = {}, unresolved = {};
+  function resolve(id) {
+    id = String(id || '').trim();
+    if (!id || codes[id]) return null;            // 空、またはすでに社員コード
+    if (map.hasOwnProperty(id)) return map[id];
+    var email = localEmail[id] || (id.indexOf('@') > 0 ? id.toLowerCase() : '');
+    var p = email ? byEmail[email] : null;
+    map[id] = p || null;
+    if (!p) unresolved[id] = email || '（メールが分からない）';
+    return map[id];
+  }
+
+  var count = {};
+  var work = function () {
+    MIGRATE_TARGETS_.forEach(function (t) {
+      readAll_(t.sheet).forEach(function (row) {
+        var patch = {};
+        t.cols.forEach(function (pair) {
+          var p = resolve(row[pair[0]]);
+          if (!p) return;
+          patch[pair[0]] = p.code;
+          if (pair[1]) patch[pair[1]] = p.name;
+          var k = t.sheet + '.' + pair[0];
+          count[k] = (count[k] || 0) + 1;
+        });
+        if (apply && Object.keys(patch).length) updateRow_(t.sheet, row[SHEETS[t.sheet].key], patch);
+      });
+    });
+  };
+  if (apply) withLock_(work); else work();
+
+  var out = {
+    実行: apply ? '書き換えました' : '下見だけです（何も書いていません）。よければ migrateIdsApply() を実行してください',
+    付け替え: Object.keys(map).filter(function (k) { return map[k]; }).map(function (k) {
+      return k + ' → ' + map[k].code + '（' + map[k].name + '）';
+    }),
+    件数: count,
+    未解決: Object.keys(unresolved).map(function (k) {
+      return k + '（' + unresolved[k] + '）… common の社員一覧に同じメールの人がいません。触っていません';
+    })
+  };
+  Logger.log(JSON.stringify(out, null, 2));
+  return out;
 }
 
 /**
