@@ -137,6 +137,19 @@ function commonDepartments_(活動中のみ) {
 }
 
 /**
+ * 画面の「部署で絞り込む」に渡す部署の一覧（有効な部署だけ）。
+ * 木は所属コード（1-2-3 形式）で組む。名称は同じ親の下でしか一意でないので、表示にはフルパスも渡す。
+ */
+function deptsForUi_() {
+  return commonDepartments_(true).map(function (r) {
+    var code = String(r['所属コード(xronos)'] || '').trim();
+    var path = String(r['フルパス'] || '').trim();
+    var name = String(r['名称'] || '').trim() || path.split(' ').pop() || code;
+    return { code: code, parent: String(r['親コード'] || '').trim(), name: name, path: path || name };
+  });
+}
+
+/**
  * 共通マスタ側の同期が今日成功しているか。**止まっていても読めてしまう**のが
  * このマスタの怖いところで、古い値のまま静かに回り続ける。
  * 「鮮度」とは呼ばない。起きている事実は「向こうの同期が今日走ったか」。

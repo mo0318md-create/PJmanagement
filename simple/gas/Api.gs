@@ -95,8 +95,13 @@ function getBootstrap() {
                notInPeopleList: !!me.notInPeopleList } : null,
     users: peopleOut.map(function (p) {
       // 画面は user_id / name で扱う。user_id の中身は社員コード（common のとき）
-      return { user_id: p.code, name: p.name, email: p.email, dept: p.deptName, position: p.positionName };
+      return { user_id: p.code, name: p.name, email: p.email, dept: p.deptName, deptCode: p.deptCode || '', position: p.positionName };
     }),
+    // 部署で絞り込むための部署の一覧。common から読めたときだけ（控え・ローカルでは出さない）
+    depts: (function () {
+      if (pp.source !== 'common') return [];
+      try { return deptsForUi_(); } catch (e) { return []; }
+    })(),
     driveReady: hasDriveRoot_(),
     peopleSource: pp.source,
     peopleNote: note,

@@ -883,4 +883,24 @@ body.is-dragging svg.g-links { opacity: .25; }
 .sum-t.late b, .sum-t.late span, .sum-t.late b small { color: var(--late); }
 .sum-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .sum-acts .btn { flex: 1 1 auto; justify-content: center; }
+
+/* 部署で絞り込む */
+.dept-list { display: flex; flex-direction: column; border-top: 1px solid var(--line2); }
+.dept-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 16px; border: 0; border-bottom: 1px solid var(--line2); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; text-align: left; flex-shrink: 0; }
+.dept-row:hover { background: var(--sunken); }
+.dept-row .dn { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dept-row .dn b { font-weight: 400; overflow-wrap: anywhere; }
+.dept-row .dn small { font-size: 11.5px; color: var(--ink3); overflow-wrap: anywhere; }
+.dept-row .dc { font-family: var(--f-mono); font-size: 12px; color: var(--ink3); }
+.dept-row.on { background: var(--accent-soft); color: var(--accent); }
+.dept-row.on .dn b { font-weight: 700; }
+.dept-row.mine .dn b { color: var(--accent); font-weight: 700; }
+.dept-row.none .dn b { color: var(--ink2); }
+.modal.dlg .m-body .dept-list { max-height: min(52vh, 460px); overflow: auto; }
+.srch.sm input { min-height: 42px; font-size: 16px; }
+.chip .x[data-deptclear] { margin-left: 4px; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); }
+.deptnote { margin: -2px 0 0; }
+
+/* 担当者を選ぶ：部署で絞る */
+.who-dept { margin-bottom: 6px; font-size: 13px; color: var(--ink2); background-color: var(--sunken); }
 </style>

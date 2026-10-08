@@ -73,6 +73,10 @@
         }
         $('bell-dot').hidden = !d.unread;
         S.driveReady = !!d.driveReady;
+        S.depts = d.depts || [];
+        // 選んだ部署は、このブラウザで覚えておく（次に開いたときも同じ部署で始まる）
+        try { S.dept = localStorage.getItem('pj.dept') || ''; } catch (e) { S.dept = ''; }
+        if (S.dept && S.dept !== '@none' && !S.depts.some(function (x) { return x.code === S.dept; })) S.dept = '';
         S.peopleSource = d.peopleSource || 'ローカル';
         S.peopleNote = d.peopleNote || '';
         S.gw.start = weekStart(H.addDays(d.today, -7));
@@ -350,6 +354,10 @@
       S.listGroupBy = gk === 'delayed' ? 'tree' : 'status';
       S.tab = 'list'; render(); window.scrollTo(0, 0); replaceUrl(); return;
     }
+    if (t.closest('[data-deptclear]')) { e.stopPropagation(); setDept(''); return; }
+    if (t.closest('[data-deptpick]')) { openDeptPicker(); return; }
+    var ds = t.closest('[data-deptset]');
+    if (ds) { closeModal(); setDept(ds.getAttribute('data-deptset')); return; }
     if (t.closest('[data-showkids]')) { S.showKids = !S.showKids; S.expanded = {}; render(); return; }
     var lgb = t.closest('[data-lgb]');
     if (lgb) { S.listGroupBy = lgb.getAttribute('data-lgb'); render(); return; }
@@ -1139,6 +1147,13 @@
     return calc;
   }
 
+  /** オーナーか担当者に、選んだ部署の人が1人でもいるプロジェクトか */
+  function projectInDept(p) {
+    if (!S.dept) return true;
+    if (inDept(p.owner_user_id)) return true;
+    return (S.items || []).some(function (x) { return x.project_id === p.project_id && x.assignee_user_id && inDept(x.assignee_user_id); });
+  }
+
   function viewProjects() {
     var delayedTasks = 0, pjWithDelay = 0, cnt = { delayed: 0, on_track: 0, not_started: 0, done: 0 };
     S.projects.forEach(function (p) {
@@ -1159,6 +1174,7 @@
 
     var HR = { delayed: 0, no_period: 1, on_track: 2, not_started: 3, done: 4 };
     var shown = S.projects.filter(function (p) {
+      if (!projectInDept(p)) return false;
       var c = S.summary[p.project_id] || {};
       var isDone = p.status === 'done' || c.health === 'done';
       if (isDone && !S.pf.done && S.pf.health !== 'done') return false;
@@ -1198,11 +1214,12 @@
 
     var bar = '<div class="bar">' +
         '<button type="button" class="chip' + (S.pfOpen ? ' on' : '') + '" data-pftoggle aria-expanded="' + S.pfOpen + '">' + ic('filter', 14) + '絞り込み' + (nFilter ? ' <b>' + nFilter + '</b>' : '') + '</button>' +
+        deptChip() +
         active.map(function (a) { return '<button type="button" class="chip on" data-pfclear="' + a[0] + '" aria-label="' + esc(a[1]) + ' を外す">' + esc(a[1]) + '<span class="x" aria-hidden="true">×</span></button>'; }).join('') +
         '<span class="spacer"></span>' +
         '<select class="chip" id="f-sort" aria-label="並び順">' + optionList([['delayed', '遅延している順'], ['due', '期限が近い順'], ['updated', '更新が新しい順'], ['name', '名前順']], S.pf.sort) + '</select>' +
         '<span class="count">' + shown.length + ' / ' + S.projects.length + ' 件</span>' +
-      '</div>';
+      '</div>' + deptNote('オーナーか担当者に {d} の人が1人でもいるプロジェクトを出しています');
     var panel = S.pfOpen ? '<div class="fpanel">' +
         '<div class="field"><label for="f-owner">オーナー</label><select id="f-owner">' +
           optionList([['', 'すべて']].concat(S.users.map(function (u) { return [u.user_id, u.name]; })), S.pf.owner) + '</select></div>' +
@@ -1240,6 +1257,7 @@
   function portfolioGanttBody() {
     if (S.items === null) return skel(4);
     var shown = S.projects.filter(function (p) {
+      if (!projectInDept(p)) return false;
       if (!S.portfolioShowDone && p.status === 'done') return false;
       if (S.portfolioOwner && p.owner_user_id !== S.portfolioOwner) return false;
       return true;
@@ -1272,7 +1290,7 @@
       }
     });
     return '<div class="bar">' +
-        '<select class="chip' + (S.portfolioOwner ? ' on' : '') + '" id="pg-owner" aria-label="オーナー">' + optionList([['', 'オーナー：すべて']].concat(S.users.map(function (u) { return [u.user_id, 'オーナー：' + u.name]; })), S.portfolioOwner) + '</select>' +
+        deptChip() + '<select class="chip' + (S.portfolioOwner ? ' on' : '') + '" id="pg-owner" aria-label="オーナー">' + optionList([['', 'オーナー：すべて']].concat(S.users.map(function (u) { return [u.user_id, 'オーナー：' + u.name]; })), S.portfolioOwner) + '</select>' +
         '<button type="button" class="chip' + (S.portfolioShowDone ? ' on' : '') + '" data-sflag="portfolioShowDone">完了も表示</button>' +
         '<span class="spacer"></span><span class="count">' + shown.length + ' 件</span>' +
       '</div>' +
@@ -1385,6 +1403,143 @@
    * 「子タスクも表示」を押すか、その親だけ開いたとき、「遅延だけ表示」のときに出す。
    */
   function kidsOpen(id) { return S.expanded[id] !== undefined ? !!S.expanded[id] : (S.showKids || !!S.df.delayedOnly); }
+  /* ---------------- 部署で絞り込む（担当者の部署。配下の課・係も含む） ---------------- */
+  function userDept(uid) { var u = S.users.filter(function (x) { return x.user_id === uid; })[0]; return u ? (u.deptCode || '') : ''; }
+  /** この人が選んだ部署（配下を含む）に入るか。部署を選んでいなければ常に true */
+  function inDept(uid) {
+    if (!S.dept) return true;
+    var code = userDept(uid);
+    if (S.dept === '@none') return !!uid && !code;
+    return !!code && (code === S.dept || code.indexOf(S.dept + '-') === 0);
+  }
+  function deptName(code) {
+    if (code === '@none') return '所属なし';
+    var d = (S.depts || []).filter(function (x) { return x.code === code; })[0];
+    return d ? d.name : '';
+  }
+  function deptPath(code) {
+    var d = (S.depts || []).filter(function (x) { return x.code === code; })[0];
+    return d ? d.path : '';
+  }
+  /** 部署の在籍者の数（配下を含む） */
+  function deptCount(code) {
+    return S.users.filter(function (u) {
+      var cd = u.deptCode || '';
+      return code === '@none' ? !cd : (!!cd && (cd === code || cd.indexOf(code + '-') === 0));
+    }).length;
+  }
+  /** 帯に置く「部署」のボタン。部署の一覧が無い（common を読めていない）ときは出さない */
+  function deptChip() {
+    if (!(S.depts || []).length) return '';
+    if (!S.dept) return '<button type="button" class="chip" data-deptpick>' + ic('people', 14) + '部署：すべて</button>';
+    return '<button type="button" class="chip on" data-deptpick title="' + esc(deptPath(S.dept) || deptName(S.dept)) + '">部署：' + esc(deptName(S.dept)) +
+      '<span class="x" data-deptclear role="button" aria-label="部署の絞り込みを外す">×</span></button>';
+  }
+  /** 絞っているときに、何で絞っているかを一文で出す */
+  function deptNote(what) {
+    if (!S.dept) return '';
+    var label = S.dept === '@none' ? '所属なし' : (deptPath(S.dept) || deptName(S.dept));
+    return '<p class="help deptnote">' + what.replace('{d}', '<b>' + esc(label) + '</b>（' + deptCount(S.dept) + ' 人）') + '</p>';
+  }
+  function setDept(code) {
+    S.dept = code || '';
+    try { if (S.dept) localStorage.setItem('pj.dept', S.dept); else localStorage.removeItem('pj.dept'); } catch (e) { /* 覚えられなくても動く */ }
+    render();
+  }
+  /** 部署の一覧（所属コードの順）。木の深さに合わせて字下げした名前を付ける */
+  /** 担当者を選ぶ部署の最初の値＝自分の部署（無ければすべて） */
+  function whoDeptDefault() { var ch = myDeptChain(); return ch.length ? ch[0] : ''; }
+
+  function deptsSorted() {
+    return (S.depts || []).slice().sort(function (a, b) {
+      var pa = a.code.split('-'), pb = b.code.split('-');
+      for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+        if (pa[i] === undefined) return -1;
+        if (pb[i] === undefined) return 1;
+        var d = (Number(pa[i]) || 0) - (Number(pb[i]) || 0);
+        if (d) return d;
+      }
+      return 0;
+    });
+  }
+  /** 自分の部署と、その上の課・部（狭い順） */
+  function myDeptChain() {
+    var my = S.me ? userDept(S.me.user_id) : '';
+    var out = [];
+    while (my) {
+      if (deptName(my)) out.push(my);
+      var i = my.lastIndexOf('-');
+      my = i > 0 ? my.slice(0, i) : '';
+    }
+    return out;
+  }
+  /** 担当者を選ぶときの部署の選択肢。最初は自分の部署 */
+  function whoDeptOptions(sel) {
+    var chain = myDeptChain(), opts = [];
+    chain.forEach(function (code, i) { opts.push([code, (i === 0 ? '自分の部署：' : '上の部署：') + deptName(code)]); });
+    opts.push(['', 'すべての部署']);
+    deptsSorted().forEach(function (d) {
+      if (chain.indexOf(d.code) >= 0) return;
+      opts.push([d.code, new Array(d.code.split('-').length).join('　') + d.name]);
+    });
+    if (deptCount('@none')) opts.push(['@none', '所属なし']);
+    return optionList(opts, sel);
+  }
+  /** 担当者の選択肢（部署で絞る）。いまの担当者は部署の外でも残す */
+  function whoOptions(deptCode, current) {
+    var inSel = function (u) {
+      if (!deptCode) return true;
+      var cd = u.deptCode || '';
+      return deptCode === '@none' ? !cd : (!!cd && (cd === deptCode || cd.indexOf(deptCode + '-') === 0));
+    };
+    var list = S.users.filter(function (u) { return inSel(u) || u.user_id === current; });
+    return optionList([['', '未アサイン']].concat(list.map(function (u) {
+      var outside = !inSel(u);
+      var tail = !deptCode || outside ? (u.dept ? '（' + (u.dept.split(' ').pop()) + '）' : '') : '';
+      return [u.user_id, u.name + tail + (outside ? ' ・ 部署の外' : '')];
+    })), current);
+  }
+
+  /** 部署を選ぶ小窓。先頭に「自分の部署」、続けて部署の木、最後に「所属なし」 */
+  function openDeptPicker() {
+    var list = (S.depts || []).slice().sort(function (a, b) {
+      var pa = a.code.split('-'), pb = b.code.split('-');
+      for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+        if (pa[i] === undefined) return -1;
+        if (pb[i] === undefined) return 1;
+        var d = (Number(pa[i]) || 0) - (Number(pb[i]) || 0);
+        if (d) return d;
+      }
+      return 0;
+    });
+    var my = S.me ? userDept(S.me.user_id) : '';
+    var row = function (code, label, sub, depth, cls) {
+      var on = S.dept === code;
+      return '<button type="button" class="dept-row' + (on ? ' on' : '') + (cls ? ' ' + cls : '') + '" data-deptset="' + esc(code) + '"' +
+        ' data-q="' + esc(String(label + ' ' + (sub || '')).toLowerCase()) + '" style="padding-left:' + (14 + depth * 20) + 'px">' +
+        '<span class="dn"><b>' + esc(label) + '</b>' + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>' +
+        '<span class="dc">' + deptCount(code) + '</span>' + (on ? ic('check', 16) : '<span style="width:16px"></span>') + '</button>';
+    };
+    var html = '';
+    if (my && deptName(my)) html += row(my, '自分の部署', deptPath(my), 0, 'mine');
+    html += '<button type="button" class="dept-row' + (S.dept ? '' : ' on') + '" data-deptset="" data-q="すべて" style="padding-left:14px"><span class="dn"><b>すべての部署</b></span>' +
+      '<span class="dc">' + S.users.length + '</span>' + (S.dept ? '<span style="width:16px"></span>' : ic('check', 16)) + '</button>';
+    list.forEach(function (d) {
+      var depth = d.code.split('-').length - 1;
+      html += row(d.code, d.name, depth ? '' : '', depth, '');
+    });
+    if (deptCount('@none')) html += row('@none', '所属なし', '部署が登録されていない人', 0, 'none');
+    openModal(modalHead('部署で絞り込む') +
+      '<div class="m-body" style="padding:12px 0 0"><div style="padding:0 16px 10px"><div class="srch sm">' + ic('search', 16) +
+        '<input id="dp-q" type="search" placeholder="部署名で探す（例：空調、1係）" aria-label="部署名で探す"></div></div>' +
+        '<div class="dept-list" id="dp-list">' + html + '</div></div>' +
+      '<div class="m-foot"><span class="help">配下の課・係も含めて絞り込みます</span></div>', true);
+    $('dp-q').addEventListener('input', function () {
+      var q = this.value.trim().toLowerCase();
+      document.querySelectorAll('#dp-list [data-q]').forEach(function (b) { b.hidden = !!q && b.getAttribute('data-q').indexOf(q) < 0; });
+    });
+  }
+
   /** どの画面にも同じ形で置く「子タスクも表示」のボタン */
   function kidsChip() {
     return '<button type="button" class="chip' + (S.showKids ? ' on' : '') + '" data-showkids aria-pressed="' + S.showKids + '">子タスクも表示</button>';
@@ -1733,9 +1888,10 @@
         pj: Object.keys(pids).length
       };
     }
-    var list = S.users.map(function (u) { return { uid: u.user_id, name: u.name, sub: u.dept || u.email || '', s: stats(u.user_id) }; });
+    var list = S.users.filter(function (u) { return inDept(u.user_id); })
+      .map(function (u) { return { uid: u.user_id, name: u.name, sub: [u.dept, u.position].filter(Boolean).join(' ・ ') || u.email || '', s: stats(u.user_id) }; });
     var none = stats(null);
-    if (none.open + none.done > 0) list.push({ name: '未アサイン', sub: '担当を決める必要があります', s: none, none: true });
+    if (!S.dept && none.open + none.done > 0) list.push({ name: '未アサイン', sub: '担当を決める必要があります', s: none, none: true });
     var ps = S.peopleSort || 'delayed';
     list.sort(function (a, b) {
       if (a.none !== b.none) return a.none ? 1 : -1;
@@ -1755,9 +1911,9 @@
       '</div>';
     }).join('');
     return pageHead +
-      '<div class="bar"><select class="chip" id="pp-sort" aria-label="並び順">' +
+      '<div class="bar">' + deptChip() + '<select class="chip" id="pp-sort" aria-label="並び順">' +
         optionList([['delayed', '遅延が多い順'], ['open', '未完了が多い順'], ['name', '名前順']], ps) + '</select>' +
-        '<span class="spacer"></span><span class="count">' + S.users.length + ' 人</span></div>' +
+        '<span class="spacer"></span><span class="count">' + (S.dept ? '表示 ' + list.length + ' 人 ／ 全 ' + S.users.length + ' 人' : S.users.length + ' 人') + '</span></div>' +
       '<div class="rows"><div class="prow head" aria-hidden="true"><span>担当者</span><span>未完了</span><span>遅延</span><span>今日期限</span><span>完了</span><span>関わるPJ</span></div>' + rows + '</div>';
   }
 
@@ -1784,7 +1940,8 @@
       return { s: s, e: e };
     }
     var byStart = function (a, b) { return String(a.node.start_date || '9999').localeCompare(String(b.node.start_date || '9999')); };
-    var targets = filterUser ? [{ user_id: filterUser, name: userName(filterUser) }] : S.users.concat([{ user_id: '@none', name: '未アサイン' }]);
+    var targets = filterUser ? [{ user_id: filterUser, name: userName(filterUser) }]
+      : S.users.filter(function (u) { return inDept(u.user_id); }).concat(S.dept ? [] : [{ user_id: '@none', name: '未アサイン' }]);
     targets.forEach(function (u) {
       var list = personUnits(u.user_id);
       if (!list.length) return;
@@ -1819,7 +1976,7 @@
       }
     });
     return '<div class="bar">' +
-        '<select class="chip' + (filterUser ? ' on' : '') + '" id="pgt-user" aria-label="担当者">' + optionList([['', '担当者：全員']].concat(S.users.map(function (u) { return [u.user_id, '担当者：' + u.name]; })), filterUser) + '</select>' +
+        deptChip() + '<select class="chip' + (filterUser ? ' on' : '') + '" id="pgt-user" aria-label="担当者">' + optionList([['', '担当者：全員']].concat(S.users.map(function (u) { return [u.user_id, '担当者：' + u.name]; })), filterUser) + '</select>' +
         '<button type="button" class="chip' + (byProject ? ' on' : '') + '" data-sflag="peopleGanttGroupByProject">プロジェクトでまとめる</button>' +
         '<button type="button" class="chip' + (showDone ? ' on' : '') + '" data-sflag="peopleGanttShowDone">完了も表示</button>' +
         '<span class="spacer"></span><span class="count">' + shownCount + ' 人 ・ ' + taskCount + ' 件</span></div>' +
@@ -1844,7 +2001,7 @@
       '<select class="chip' + (searchState.pj ? ' on' : '') + '" id="s-pj" aria-label="プロジェクト">' + optionList([['', 'プロジェクト：すべて']].concat(S.projects.map(function (p) { return [p.project_id, p.name]; })), searchState.pj) + '</select>' +
       '<select class="chip' + (searchState.who ? ' on' : '') + '" id="s-who" aria-label="担当者">' + optionList([['', '担当者：すべて'], ['@none', '未アサイン']].concat(S.users.map(function (u) { return [u.user_id, u.name]; })), searchState.who) + '</select>' +
       '<select class="chip' + (searchState.status ? ' on' : '') + '" id="s-status" aria-label="ステータス">' + optionList([['', 'ステータス：すべて']].concat(H.STATUS_ORDER.map(function (k) { return [k, H.STATUS_LABEL[k]]; })), searchState.status) + '</select>' +
-      kidsChip() + '</div>';
+      deptChip() + kidsChip() + '</div>' + deptNote('担当者が {d} に属するタスクだけを出しています');
     var pageHead = head('横断検索', '全プロジェクトのタスクをまとめて探します', '');
     if (S.items === null) return pageHead + box + chips + skel(5);
     var q = searchState.text.trim().toLowerCase();
@@ -1858,6 +2015,7 @@
         if (searchState.pj && n.project_id !== searchState.pj) return;
         if (searchState.who === '@none' ? !!n.assignee_user_id : (searchState.who && n.assignee_user_id !== searchState.who)) return;
         if (searchState.status && n.status !== searchState.status) return;
+        if (S.dept && !inDept(n.assignee_user_id)) return;
         found.push({ node: n, calc: r.calc, project: p });
       });
     });
@@ -3117,8 +3275,12 @@
             return '<button type="button" role="radio" data-tst="' + s + '" aria-checked="' + (s === item.status) + '" class="' + (s === item.status ? 'active' : '') + '">' + H.STATUS_LABEL[s] + '</button>';
           }).join('') + '</div><input type="hidden" id="t-status" value="' + esc(item.status) + '"></div>' +
         '<div class="row2">' +
-          '<div class="field"><label for="t-who">担当者</label><select id="t-who">' +
-            optionList([['', '未アサイン']].concat(S.users.map(function (u) { return [u.user_id, u.name]; })), item.assignee_user_id) + '</select></div>' +
+          '<div class="field"><label for="t-who">担当者</label>' +
+            ((S.depts || []).length
+              ? '<select id="t-who-dept" class="who-dept" aria-label="担当者を選ぶ部署">' + whoDeptOptions(whoDeptDefault()) + '</select>' +
+                '<select id="t-who">' + whoOptions(whoDeptDefault(), item.assignee_user_id) + '</select>'
+              : '<select id="t-who">' + optionList([['', '未アサイン']].concat(S.users.map(function (u) { return [u.user_id, u.name]; })), item.assignee_user_id) + '</select>') +
+          '</div>' +
           '<div class="field"><label for="t-type">種別</label><select id="t-type">' +
             optionList([['work', '作業'], ['bug', 'バグ'], ['req', '要望']], item.item_type) + '</select></div>' +
         '</div>' +
@@ -3154,6 +3316,11 @@
       '</div>');
 
     if (isNew || !isPhone()) $('t-name').focus();
+    if ($('t-who-dept')) $('t-who-dept').addEventListener('change', function () {
+      var cur = $('t-who').value;
+      $('t-who').innerHTML = whoOptions(this.value, cur);
+      $('t-who').value = cur;
+    });
     // つながり：前のタスクを選ぶ・外す。日付を変えたら「日程が前後」の注意も出し直す
     var deps = depIds(item).slice();
     var depBox = $('t-deps');
