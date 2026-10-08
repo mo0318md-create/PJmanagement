@@ -101,7 +101,7 @@ button { cursor: pointer; }
 .sidebar a:hover { background: var(--sunken); color: var(--ink); }
 .sidebar a.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .sidebar .cnt { margin-left: auto; font-family: var(--f-mono); font-size: 11px; color: var(--late); font-weight: 500; }
-.main { min-width: 0; padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 16px; }
+.main { min-width: 0; width: 100%; max-width: 1480px; margin-inline: auto; box-sizing: border-box; padding: 22px 28px 48px; display: flex; flex-direction: column; gap: 16px; }   /* 横に広い画面でも間延びしないよう、中身の幅に上限を付けて中央に置く */
 .tabbar, .fab { display: none; }
 .loading { padding: 60px 0; text-align: center; color: var(--ink3); }
 
